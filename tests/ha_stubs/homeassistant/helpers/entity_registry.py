@@ -4,9 +4,12 @@ from typing import Any
 
 
 class RegistryEntry:
-    def __init__(self, entity_id: str, device_id: str | None = None) -> None:
+    def __init__(
+        self, entity_id: str, device_id: str | None = None, unique_id: str | None = None
+    ) -> None:
         self.entity_id = entity_id
         self.device_id = device_id
+        self.unique_id = unique_id
 
 
 class EntityRegistry:
@@ -19,8 +22,10 @@ class EntityRegistry:
     def async_remove(self, entity_id: str) -> None:
         self._entries.pop(entity_id, None)
 
-    def _register(self, entity_id: str, device_id: str | None = None) -> None:
-        self._entries[entity_id] = RegistryEntry(entity_id, device_id)
+    def _register(
+        self, entity_id: str, device_id: str | None = None, unique_id: str | None = None
+    ) -> None:
+        self._entries[entity_id] = RegistryEntry(entity_id, device_id, unique_id)
 
 
 def async_get(hass: Any) -> EntityRegistry:

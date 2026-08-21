@@ -269,6 +269,70 @@ def test_depublish_bridge_service_clears_remote_bridge_topics_and_entity():
     assert ("share/homeassistant/sensor/garage_humidity/config", "", True) in published
 
 
+def test_depublish_bridge_service_removes_the_device_too():
+    hass = HomeAssistant()
+    entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
+
+    async def scenario():
+        await grapevine.async_setup_entry(hass, entry)
+        await mqtt.async_fire_mqtt_message(
+            hass,
+            "share/homeassistant/sensor/garage_humidity/config",
+            json.dumps(_REMOTE_PAYLOAD),
+        )
+        device = next(
+            device
+            for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+            if (DOMAIN, "other_bridge") in device.identifiers
+        )
+        await hass.services.async_call(
+            DOMAIN, SERVICE_DEPUBLISH_BRIDGE, {ATTR_BRIDGE_DEVICE: device.id}
+        )
+        return device.id
+
+    device_id = _run(scenario())
+
+    assert dr.async_get(hass).async_get(device_id) is None
+
+
+def test_depublish_bridge_service_clears_a_bridge_never_rediscovered_this_session():
+    # Bug report this covers: an old bridge whose sensor shows
+    # "Unavailable" -- it survived a restart via the entity registry, but
+    # nothing rediscovered it live this session (its retained discovery
+    # message is long gone from the broker). Calling the service on it
+    # must still depublish and remove it -- not silently no-op.
+    hass = HomeAssistant()
+    entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
+
+    async def scenario():
+        await grapevine.async_setup_entry(hass, entry)
+        # Never fires an MQTT message -- simulates an entity that
+        # survived purely via registry persistence, unknown to
+        # RemoteEntityManager's in-memory bookkeeping this session.
+        device = dr.async_get(hass).async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, "stale_bridge")},
+            name="Bridge Test Jakob",
+        )
+        er.async_get(hass)._register(
+            "sensor.stale_bridge_garage_humidity",
+            device.id,
+            "stale_bridge::sensor.garage_humidity",
+        )
+
+        await hass.services.async_call(
+            DOMAIN, SERVICE_DEPUBLISH_BRIDGE, {ATTR_BRIDGE_DEVICE: device.id}
+        )
+        return device.id
+
+    device_id = _run(scenario())
+
+    published = {(topic, payload, retain) for topic, payload, retain in mqtt._state(hass).published}
+    assert ("share/homeassistant/sensor/garage_humidity/config", "", True) in published
+    assert er.async_get(hass).async_get("sensor.stale_bridge_garage_humidity") is None
+    assert dr.async_get(hass).async_get(device_id) is None
+
+
 def test_depublish_bridge_service_raises_for_unknown_device():
     hass = HomeAssistant()
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])

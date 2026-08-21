@@ -153,7 +153,7 @@ class ConfigEntriesRegistry:
                         identifiers=identifiers,
                         name=device_info.get("name"),
                     ).id
-                er.async_get(self._hass)._register(entity.entity_id, device_id)
+                er.async_get(self._hass)._register(entity.entity_id, device_id, entity.unique_id)
 
         return _add_entities
 

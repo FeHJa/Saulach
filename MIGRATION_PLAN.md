@@ -345,16 +345,30 @@ present and unfixed, per §5a — this phase doesn't touch them.
   bridge. There's no reliable local signal to tell a dead peer from a
   quiet one, so this isn't automatic: the service takes a bridge device
   the user names explicitly (device selector in `services.yaml`,
-  Developer Tools → Actions only -- no button entity), and for every
-  entity currently materialized from it, publishes an empty retained
-  payload to its discovery topic (durably clearing the broker, unlike a
-  plain local entity delete) and tears it down locally right away rather
-  than waiting on its own publish looping back. See `PROTOCOL.md` §5c.
-  `RemoteEntityManager`/`__init__.py` resolve the device back to a
-  `RemoteEntityManager` via a small `entry_id -> manager` dict in
-  `hass.data[DOMAIN]`, the same pattern `republish_handlers` already
-  uses, rather than `hass.config_entries.async_get_entry` -- keeps the
-  lookup self-contained the same way the existing republish dispatch is.
+  Developer Tools → Actions only -- no button entity), publishes an
+  empty retained payload to each entity's discovery topic (durably
+  clearing the broker, unlike a plain local entity delete) and tears it
+  down locally right away rather than waiting on its own publish looping
+  back. See `PROTOCOL.md` §5c. `RemoteEntityManager`/`__init__.py`
+  resolve the device back to a `RemoteEntityManager` via a small
+  `entry_id -> manager` dict in `hass.data[DOMAIN]`, the same pattern
+  `republish_handlers` already uses, rather than
+  `hass.config_entries.async_get_entry` -- keeps the lookup
+  self-contained the same way the existing republish dispatch is.
+  **Follow-up fix:** the first cut sourced entities from
+  `RemoteEntityManager`'s in-memory bookkeeping (populated only by
+  discovery messages actually seen this session) -- a no-op for exactly
+  the bridges this service exists for, since a long-dead peer is by
+  definition not delivering anything this session; its entities showed
+  "Unavailable" and the service silently did nothing, no error either.
+  `async_depublish_bridge` now reads the *entity registry* for the
+  target device instead (persists across restarts regardless of
+  session), reconstructs each entity's discovery topic from its
+  `unique_id`, and either routes through the normal removal path (if
+  `RemoteEntityManager` does have it live) or removes the stale registry
+  entry directly (nothing live to call `.async_remove()` on). Also now
+  removes the device itself once its entities are gone, rather than
+  waiting for the next startup's #18 cleanup pass to catch it.
 - Broaden test coverage (config flow, scheduler timing) toward CI.
 - `button` entity per config entry that calls `grapevine.republish`.
 - **Multi-entry support** (lower priority — not currently needed, but

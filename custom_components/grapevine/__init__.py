@@ -236,7 +236,12 @@ def _make_depublish_bridge_service_handler(hass: HomeAssistant):
         if manager is None:
             raise ServiceValidationError(f"No running Grapevine instance owns device {device_id}")
 
-        removed = await manager.async_depublish_bridge(bridge_id)
+        removed = await manager.async_depublish_bridge(bridge_id, device_id)
+        # Every entity async_depublish_bridge knew about for this device
+        # is gone now (it swept up anything still in the registry too),
+        # so the device itself is guaranteed orphaned -- no need to wait
+        # for the next startup's cleanup pass (#18) to catch it.
+        device_registry.async_remove_device(device_id)
         _LOGGER.info("Depublished bridge %s: %d topic(s) cleared", bridge_id, removed)
 
     return _async_handle_depublish_bridge
