@@ -383,3 +383,20 @@ Own metadata arriving back via the broker (any client subscribed to
 comparing the topic's `bridge_id` against this instance's own slug — same shape as §5's
 loop guard, simpler since there's no JSON `unique_id`/`bridge_id` prefix convention to
 check, just an exact match.
+
+**Amendment: remote device's displayed firmware.** A remote bridge's native device (§5a)
+gets its `sw_version` from exactly one place: the diagnostic entities above, set to
+`"{integration_version} (protocol v{protocol_version})"`. `BridgedSensorEntity` (the
+regular bridged-entity device_info, built from every §2/§3 discovery message) does
+**not** set `sw_version`, even though the incoming payload's `device.sw_version` field is
+present — that field is always the wire protocol's fixed legacy constant (§3's
+`SW_VERSION`, `"1.0.3"`, inherited unchanged from the original blueprint automation), not
+a peer's actual release version. Home Assistant's device registry takes whichever entity
+most recently supplied a `sw_version` for a given device, and ordinary discovery messages
+fire far more often (every state change, not just the `time_pattern` tick metadata uses)
+than metadata does — so if `BridgedSensorEntity` also set it, `"1.0.3"` would win almost
+every time, permanently hiding the real version shown by the diagnostic entities. Purely a
+receiving-side display choice, like §5a — the outgoing wire payload (§3) is unchanged, and
+a bridge with no metadata yet (a blueprint-based peer, which never sends §9 at all, or a
+Saulach peer whose first `time_pattern` tick hasn't landed) simply shows no firmware
+version rather than the misleading constant.

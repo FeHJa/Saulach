@@ -28,6 +28,17 @@ async def async_setup_entry(
 
 
 class BridgedSensorEntity(SensorEntity):
+    """Deliberately doesn't set device_info["sw_version"] from the incoming
+    payload's device.sw_version -- that field is always the wire-protocol's
+    fixed legacy constant (PROTOCOL.md §3's SW_VERSION, "1.0.3", inherited
+    from the original blueprint automation), not this bridge's actual
+    release version, and setting it here would fight BridgeMetadataEntities
+    for the same device's sw_version field: ordinary discovery messages
+    fire far more often (every state change) than metadata (once per
+    time_pattern tick), so the meaningless "1.0.3" kept winning and hiding
+    the real version. Purely a receiving-side display choice -- the
+    outgoing wire payload (discovery.py) is unchanged."""
+
     _attr_should_poll = False
 
     def __init__(
@@ -39,7 +50,6 @@ class BridgedSensorEntity(SensorEntity):
         unit_of_measurement: str | None,
         device_identifiers: set[tuple[str, str]],
         device_name: str | None,
-        device_sw_version: str | None,
     ) -> None:
         self._attr_unique_id = unique_id
         self._attr_name = name
@@ -48,7 +58,6 @@ class BridgedSensorEntity(SensorEntity):
         self._attr_device_info = {
             "identifiers": device_identifiers,
             "name": device_name,
-            "sw_version": device_sw_version,
         }
 
     def set_native_value(self, value: str) -> None:
@@ -63,7 +72,6 @@ class BridgedSensorEntity(SensorEntity):
         unit_of_measurement: str | None,
         device_identifiers: set[tuple[str, str]],
         device_name: str | None,
-        device_sw_version: str | None,
     ) -> None:
         self._attr_name = name
         self._attr_device_class = device_class
@@ -71,7 +79,6 @@ class BridgedSensorEntity(SensorEntity):
         self._attr_device_info = {
             "identifiers": device_identifiers,
             "name": device_name,
-            "sw_version": device_sw_version,
         }
         self.async_write_ha_state()
 
