@@ -1,5 +1,7 @@
 # Saulach Bridge
 
+![Saulach Bridge](custom_components/saulach/brand/logo.png)
+
 **Peer-to-peer entity federation for Home Assistant.**
 
 **Version: 0.1** — pre-release, not yet tested against a real broker.
