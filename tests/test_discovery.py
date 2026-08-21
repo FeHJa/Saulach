@@ -4,8 +4,8 @@ These encode PROTOCOL.md as an executable spec. No Home Assistant
 dependency required: discovery.py has none by design.
 """
 
-from custom_components.grapevine.const import PROTOCOL_VERSION, SW_VERSION
-from custom_components.grapevine.discovery import (
+from custom_components.saulach.const import PROTOCOL_VERSION, SW_VERSION
+from custom_components.saulach.discovery import (
     build_discovery_payload,
     build_metadata_payload,
     domain_from_entity_id,

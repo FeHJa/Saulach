@@ -13,9 +13,9 @@ from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from custom_components import grapevine
-from custom_components.grapevine import scheduler as scheduler_module
-from custom_components.grapevine.const import (
+from custom_components import saulach
+from custom_components.saulach import scheduler as scheduler_module
+from custom_components.saulach.const import (
     CONF_BRIDGE_NAME,
     CONF_ENTITIES,
     CONF_SENSOR_VALUE_PREFIX,
@@ -65,7 +65,7 @@ def test_federation_message_materializes_native_entity():
     }
 
     async def scenario():
-        await grapevine.async_setup_entry(hass, entry)
+        await saulach.async_setup_entry(hass, entry)
 
         await mqtt.async_fire_mqtt_message(
             hass,
@@ -104,7 +104,7 @@ def test_removing_entry_removes_the_native_entity():
     }
 
     async def scenario():
-        await grapevine.async_setup_entry(hass, entry)
+        await saulach.async_setup_entry(hass, entry)
         await mqtt.async_fire_mqtt_message(
             hass,
             "share/homeassistant/sensor/garage_humidity/config",
@@ -115,7 +115,7 @@ def test_removing_entry_removes_the_native_entity():
         entity_id = manager._entities["other_bridge::sensor.garage_humidity"].entity_id
         assert hass.states.get(entity_id) is not None
 
-        await grapevine.async_unload_entry(hass, entry)
+        await saulach.async_unload_entry(hass, entry)
         await entry.async_unload()
 
         assert hass.states.get(entity_id) is None
@@ -133,7 +133,7 @@ def test_does_not_materialize_own_echoed_message():
     entry = _make_entry()
 
     async def scenario():
-        await grapevine.async_setup_entry(hass, entry)
+        await saulach.async_setup_entry(hass, entry)
 
         own_payload = {
             "name": "Should Not Appear",

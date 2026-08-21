@@ -18,10 +18,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers.event import async_fire_time_changed
 
-from custom_components.grapevine import scheduler as scheduler_module
-from custom_components.grapevine.const import CONF_ENTITIES, CONF_TIME_PATTERN_MINUTES
-from custom_components.grapevine.protocol import ProtocolAdapter
-from custom_components.grapevine.scheduler import BridgeScheduler
+from custom_components.saulach import scheduler as scheduler_module
+from custom_components.saulach.const import CONF_ENTITIES, CONF_TIME_PATTERN_MINUTES
+from custom_components.saulach.protocol import ProtocolAdapter
+from custom_components.saulach.scheduler import BridgeScheduler
 
 
 class RecordingAdapter(ProtocolAdapter):

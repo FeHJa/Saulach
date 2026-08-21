@@ -160,7 +160,7 @@ class RemoteEntityManager:
                 await self._async_remove_entity(metadata_entity)
 
     async def async_depublish_bridge(self, bridge_id: str, device_id: str) -> int:
-        """grapevine.depublish_bridge service: a human has decided
+        """saulach.depublish_bridge service: a human has decided
         `bridge_id` is dead (e.g. a decommissioned peer whose empty
         retained payload never reached us while we were online to see it,
         so it keeps reappearing on every restart -- MQTT retains forever

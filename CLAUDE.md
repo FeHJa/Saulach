@@ -164,7 +164,7 @@ collision, hardcoded `sensor` component) — both originate on the far side, in 
 instance is just as exposed to the §3 device_class amendment's failure mode as the
 sending side is — a payload's `device_class` is only safe to apply if it actually came
 from a `sensor`-domain entity, and nothing about the wire format stops a peer (a
-not-yet-updated Grapevine instance, or any other implementation of this protocol) from
+not-yet-updated Saulach instance, or any other implementation of this protocol) from
 sending an unsafe one. Rather than trust the payload, `RemoteEntityManager` recovers the
 source entity's real domain from the payload's own `unique_id` (`{slug_bridge_name}::
 {entity_id}`, §3) and applies the same domain check before setting it on the native
@@ -193,7 +193,7 @@ protocol negotiation: Home Assistant's own `mqtt` integration already treats it 
 their forwarding step relays the empty payload into their local discovery root exactly
 like any other payload, and their local `mqtt` integration does the rest.
 
-Grapevine-based receivers materialize entities natively instead (§5a), so they don't go
+Saulach-based receivers materialize entities natively instead (§5a), so they don't go
 through the `mqtt` integration's removal handling — `RemoteEntityManager` is taught to
 recognize an empty payload on a topic it previously saw a real payload on (correlated by
 *topic*, not `unique_id`, since an empty payload carries no JSON to read) and remove the
@@ -204,7 +204,7 @@ native entity it created for it.
 **Status: implemented (issue #12 follow-up).** §5b's removal signal only reaches a
 receiver if it's online and subscribed at the exact moment the empty retained payload is
 published. MQTT retains a topic's last payload forever otherwise — a fresh subscribe (e.g.
-every Grapevine restart) redelivers whatever was last retained, indistinguishable from a
+every Saulach restart) redelivers whatever was last retained, indistinguishable from a
 live republish. If the empty payload was never delivered live (receiver offline, or
 whoever decommissioned the peer only cleared the broker's retained store without a client
 actually online to publish-and-be-delivered), the peer's entities keep reappearing on
@@ -216,10 +216,10 @@ given peer is dead rather than merely quiet between publishes (unlike a state-ch
 time-pattern republish, silence isn't itself an event). Deciding a specific bridge is dead
 is deliberately left to a human, the same way the person clearing this conversation's six
 example bridges did — by external knowledge (migrated, decommissioned, "yes that's still
-running blueprint"), not by any timeout Grapevine could apply on its own.
+running blueprint"), not by any timeout Saulach could apply on its own.
 
-Given that human decision, `grapevine.depublish_bridge` (a service, not automatic) takes a
-Grapevine bridge device the user names explicitly. It reads the *entity registry*, not
+Given that human decision, `saulach.depublish_bridge` (a service, not automatic) takes a
+Saulach bridge device the user names explicitly. It reads the *entity registry*, not
 `RemoteEntityManager`'s in-memory bookkeeping, to find that device's entities — the whole
 reason this service exists is that a long-dead peer's entities were never redelivered this
 session (nothing to redeliver: the retained message is already gone), so they have no
@@ -227,7 +227,7 @@ in-memory footprint at all, and show as "Unavailable" in the UI while still sitt
 registry. For each one it finds:
 - publishes an empty retained payload to that entity's own discovery topic, reconstructed
   from its `unique_id` (`{bridge_id}::{entity_id}`, §3) — the *same* topic, and the *same*
-  removal convention, as §5b — a receiving Grapevine or blueprint-based instance elsewhere
+  removal convention, as §5b — a receiving Saulach or blueprint-based instance elsewhere
   on the shared prefix cannot tell this apart from the origin bridge's own depublish), and
 - tears it down immediately: through the normal §5b removal path if `RemoteEntityManager`
   does happen to have it live this session, or directly from the registry otherwise (there
@@ -342,7 +342,7 @@ and stays out of scope here; a future change that wants it needs its own design 
 **Why this needs no coordination with the other two bridge instances** (unlike §8's
 Phase 3 redesign): the topic has three segments ending in `metadata`, so it never matches
 `{shared_discovery_prefix}+/+/config` — the two-segment, `config`-suffixed pattern every
-receiver (blueprint or Grapevine) subscribes to today (§5). Nobody's subscription sees
+receiver (blueprint or Saulach) subscribes to today (§5). Nobody's subscription sees
 this message unless they deliberately opt into it in the future, so publishing it
 unilaterally changes nothing about how any existing receiver behaves — the same safety
 argument §5a used for native materialization.
@@ -356,7 +356,7 @@ the same 0-9s jitter as any other publish.
 surfaced this bridge's own metadata locally — a device representing "this bridge
 instance" with three `entity_category: diagnostic` entities (entity count, last
 heartbeat, HA version). In practice this just added a device with no sensors on it to
-every Grapevine install, cluttering the integration's device list without adding
+every Saulach install, cluttering the integration's device list without adding
 information the user didn't already have some other way (they're the one running this
 instance). Removed per user feedback; this bridge's own metadata is now wire-only —
 still published every tick as documented above, still available via Home Assistant's

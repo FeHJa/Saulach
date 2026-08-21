@@ -13,8 +13,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import AbortFlow
 
-from custom_components.grapevine.config_flow import GrapevineConfigFlow
-from custom_components.grapevine.const import (
+from custom_components.saulach.config_flow import SaulachConfigFlow
+from custom_components.saulach.const import (
     CONF_BRIDGE_NAME,
     CONF_ENTITIES,
     CONF_SENSOR_VALUE_PREFIX,
@@ -31,8 +31,8 @@ VALID_INPUT = {
 }
 
 
-def _make_flow() -> GrapevineConfigFlow:
-    flow = GrapevineConfigFlow()
+def _make_flow() -> SaulachConfigFlow:
+    flow = SaulachConfigFlow()
     flow.hass = HomeAssistant()
     return flow
 

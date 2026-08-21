@@ -39,9 +39,9 @@ def normalize_prefix(prefix: str) -> str:
 def domain_from_unique_id(unique_id: str) -> str | None:
     """Recovers the source entity's real HA domain from our own unique_id
     convention (`{slug_bridge_name}::{entity_id}`, §3) -- lets a
-    *receiving* Grapevine instance apply the same device_class safety
+    *receiving* Saulach instance apply the same device_class safety
     check as the sending side (issue #13 continued) without trusting an
-    incoming payload's device_class on its own. Every Grapevine sender
+    incoming payload's device_class on its own. Every Saulach sender
     follows this convention, but nothing enforces it on the wire, so
     returns None -- "unknown, treat as unsafe" -- for anything that
     doesn't match it, rather than guessing."""

@@ -1,4 +1,4 @@
-# Migration Plan: Blueprint → Grapevine
+# Migration Plan: Blueprint → Saulach
 
 Source blueprint: https://github.com/FeHJa/HA-Blueprint-MQTT-Bridge/blob/main/mqtt_bridge.yaml
 Wire protocol contract: `PROTOCOL.md` (authoritative for Phase 1 behavior)
@@ -6,7 +6,7 @@ Wire protocol contract: `PROTOCOL.md` (authoritative for Phase 1 behavior)
 ## Goal
 
 Replace the YAML automation blueprint with a native Home Assistant custom
-integration (`custom_components/grapevine/`) that is functionally
+integration (`custom_components/saulach/`) that is functionally
 identical on the wire — any other instance still running the blueprint, or
 another migrated instance, must interoperate without changes on its end.
 
@@ -34,7 +34,7 @@ layer. See "Target architecture" and "Phase 3" below.
 ## Target architecture
 
 ```
-custom_components/grapevine/
+custom_components/saulach/
 ├── __init__.py          # async_setup_entry / async_unload_entry, wires everything together
 ├── manifest.json         # domain, dependencies: [mqtt], config_flow: true, iot_class
 ├── const.py               # DOMAIN, CONF_* keys, defaults, sw_version, PROTOCOL_VERSION, the 8 regex patterns
@@ -139,7 +139,7 @@ stored* (`entities`/prefixes/`bridge_name` in `data`, `time_pattern` in
 conventional HA identity-vs-safely-reconfigurable split — in practice that
 second entry point wasn't discoverable (users only ever found the gear-icon
 "Configure" button and concluded entities/prefixes/bridge_name couldn't be
-changed at all). `GrapevineOptionsFlow` was widened to edit every field —
+changed at all). `SaulachOptionsFlow` was widened to edit every field —
 `data` and `options` alike — in one single "Configure" step, updating both
 via one `hass.config_entries.async_update_entry(...)` call. There is no
 longer a separate `async_step_reconfigure`.
@@ -184,7 +184,7 @@ longer a separate `async_step_reconfigure`.
      only holds if all instances actually fire on the same wall-clock
      minute, which a setup-time-anchored interval does not guarantee.
    - On-demand republish: a domain service call,
-     `grapevine.republish`, targeting a config entry (via a
+     `saulach.republish`, targeting a config entry (via a
      `config_entry_id`/device selector in `services.yaml`), doing the
      same full republish loop as the time_pattern trigger. This is the
      Phase 1 replacement for the blueprint's `force_republish_sensors`
@@ -297,7 +297,7 @@ present and unfixed, per §5a — this phase doesn't touch them.
 
 ### Phase 2 — Integration polish
 
-- ~~Options flow for `time_pattern`~~ **Done** (issue #7): `GrapevineOptionsFlow`
+- ~~Options flow for `time_pattern`~~ **Done** (issue #7): `SaulachOptionsFlow`
   is the single "Configure" step covering every editable field —
   `time_pattern_minutes` plus the `data` fields (entities/prefixes/
   bridge_name) — wired to an `entry.add_update_listener` that actually
@@ -305,7 +305,7 @@ present and unfixed, per §5a — this phase doesn't touch them.
   version of this split entities/prefixes/bridge_name into a separate
   `async_step_reconfigure` flow, but that second entry point wasn't
   discoverable in practice (issue #7's reopening) and was folded back into
-  `GrapevineOptionsFlow`. Entities dropped from the list, or the whole
+  `SaulachOptionsFlow`. Entities dropped from the list, or the whole
   entry on removal, are now depublished (empty retained payload) rather
   than left as stale entities on other instances; see `PROTOCOL.md`
   §5b/`async_depublish_entity`.
@@ -336,7 +336,7 @@ present and unfixed, per §5a — this phase doesn't touch them.
   bridge is currently publishing, so this can't delete anything active
   and can't affect entity history (which is already gone once the
   entities themselves are gone).
-- ~~`grapevine.depublish_bridge` service~~ **Done** (issue #12 follow-up):
+- ~~`saulach.depublish_bridge` service~~ **Done** (issue #12 follow-up):
   the startup cleanup above only catches a device once it has zero
   entities, which never happens for a peer whose empty-retained removal
   signal (§5b) was never actually delivered to us live -- MQTT retains
@@ -370,7 +370,7 @@ present and unfixed, per §5a — this phase doesn't touch them.
   removes the device itself once its entities are gone, rather than
   waiting for the next startup's #18 cleanup pass to catch it.
 - Broaden test coverage (config flow, scheduler timing) toward CI.
-- `button` entity per config entry that calls `grapevine.republish`.
+- `button` entity per config entry that calls `saulach.republish`.
 - **Multi-entry support** (lower priority — not currently needed, but
   worth designing for): allow multiple config entries so one HA install
   can run several bridge instances (e.g. against different brokers or
@@ -424,7 +424,7 @@ subscription model:
 ## Decisions
 
 1. **On-demand full republish trigger**: `services.yaml` service call
-   `grapevine.republish` in Phase 1. The Phase 2 `button` entity
+   `saulach.republish` in Phase 1. The Phase 2 `button` entity
    calls this same service rather than duplicating the republish logic.
 2. **Minimum HA core version**: `2026.7`. `manifest.json`
    `"homeassistant"` requirement pinned accordingly; target the
@@ -467,7 +467,7 @@ subscription model:
    delete+recreate. The fake HA test harness doesn't model this detection
    at all, so the test suite passed the whole time. Fixed by fetching it
    once via `hass.async_add_executor_job` in `async_setup_entry` and
-   threading the value through `GrapevineRuntimeData` instead of letting
+   threading the value through `SaulachRuntimeData` instead of letting
    each consumer read the file itself. Any future blocking call (file I/O,
    network, subprocess) must go through `hass.async_add_executor_job` the
    same way — this class of bug is invisible to the test harness, so it

@@ -13,9 +13,9 @@ from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, State
 
-from custom_components.grapevine import mqtt_io
-from custom_components.grapevine.adapters.legacy_discovery import LegacyDiscoveryAdapter
-from custom_components.grapevine.const import (
+from custom_components.saulach import mqtt_io
+from custom_components.saulach.adapters.legacy_discovery import LegacyDiscoveryAdapter
+from custom_components.saulach.const import (
     CONF_BRIDGE_NAME,
     CONF_SENSOR_VALUE_PREFIX,
     CONF_SHARED_DISCOVERY_PREFIX,

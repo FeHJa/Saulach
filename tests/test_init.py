@@ -14,9 +14,9 @@ from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from custom_components import grapevine
-from custom_components.grapevine import scheduler as scheduler_module
-from custom_components.grapevine.const import (
+from custom_components import saulach
+from custom_components.saulach import scheduler as scheduler_module
+from custom_components.saulach.const import (
     ATTR_BRIDGE_DEVICE,
     ATTR_CONFIG_ENTRY_ID,
     CONF_BRIDGE_NAME,
@@ -28,9 +28,9 @@ from custom_components.grapevine.const import (
     SERVICE_DEPUBLISH_BRIDGE,
     SERVICE_REPUBLISH,
 )
-from custom_components.grapevine.adapters.legacy_discovery import LegacyDiscoveryAdapter
-from custom_components.grapevine.remote_entity_manager import RemoteEntityManager
-from custom_components.grapevine.scheduler import BridgeScheduler
+from custom_components.saulach.adapters.legacy_discovery import LegacyDiscoveryAdapter
+from custom_components.saulach.remote_entity_manager import RemoteEntityManager
+from custom_components.saulach.scheduler import BridgeScheduler
 
 
 @pytest.fixture(autouse=True)
@@ -63,20 +63,20 @@ def test_setup_entry_raises_config_entry_not_ready_when_mqtt_not_ready():
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
 
     with pytest.raises(ConfigEntryNotReady):
-        _run(grapevine.async_setup_entry(hass, entry))
+        _run(saulach.async_setup_entry(hass, entry))
 
 
 def test_setup_entry_wires_scheduler_onto_runtime_data():
     hass = HomeAssistant()
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
 
-    result = _run(grapevine.async_setup_entry(hass, entry))
+    result = _run(saulach.async_setup_entry(hass, entry))
 
     assert result is True
     assert isinstance(entry.runtime_data.scheduler, BridgeScheduler)
     assert isinstance(entry.runtime_data.remote_entity_manager, RemoteEntityManager)
     assert isinstance(entry.runtime_data.protocol_adapter, LegacyDiscoveryAdapter)
-    assert entry.runtime_data.integration_version == "0.1.5"
+    assert entry.runtime_data.integration_version == "0.1.7"
 
 
 def test_setup_entry_reads_manifest_version_off_the_event_loop(monkeypatch):
@@ -95,16 +95,16 @@ def test_setup_entry_reads_manifest_version_off_the_event_loop(monkeypatch):
     hass = HomeAssistant()
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
 
-    _run(grapevine.async_setup_entry(hass, entry))
+    _run(saulach.async_setup_entry(hass, entry))
 
-    assert grapevine.integration_version in calls
+    assert saulach.integration_version in calls
 
 
 def test_setup_entry_registers_service_once():
     hass = HomeAssistant()
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
 
-    _run(grapevine.async_setup_entry(hass, entry))
+    _run(saulach.async_setup_entry(hass, entry))
 
     assert hass.services.has_service(DOMAIN, SERVICE_REPUBLISH)
 
@@ -117,8 +117,8 @@ def test_republish_service_dispatches_to_correct_entry(monkeypatch):
     hass.states.async_set("sensor.b", "2")
 
     async def scenario():
-        await grapevine.async_setup_entry(hass, entry_a)
-        await grapevine.async_setup_entry(hass, entry_b)
+        await saulach.async_setup_entry(hass, entry_a)
+        await saulach.async_setup_entry(hass, entry_b)
 
         # Both entries schedule an initial resync republish on setup; drain
         # those before exercising the service call so they don't muddy the
@@ -150,7 +150,7 @@ def test_republish_service_dispatches_to_correct_entry(monkeypatch):
 def test_republish_service_raises_for_unknown_entry_id():
     hass = HomeAssistant()
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
-    _run(grapevine.async_setup_entry(hass, entry))
+    _run(saulach.async_setup_entry(hass, entry))
 
     async def scenario():
         with pytest.raises(ServiceValidationError):
@@ -166,10 +166,10 @@ def test_unload_entry_removes_its_republish_handler():
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
 
     async def scenario():
-        await grapevine.async_setup_entry(hass, entry)
+        await saulach.async_setup_entry(hass, entry)
         assert "entry1" in hass.data[DOMAIN]["republish_handlers"]
 
-        await grapevine.async_unload_entry(hass, entry)
+        await saulach.async_unload_entry(hass, entry)
         await entry.async_unload()
 
         assert "entry1" not in hass.data[DOMAIN]["republish_handlers"]
@@ -186,15 +186,15 @@ def test_remove_entry_depublishes_every_bridged_entity():
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a", "sensor.b"])
 
     async def scenario():
-        await grapevine.async_setup_entry(hass, entry)
+        await saulach.async_setup_entry(hass, entry)
         # async_unload_entry always runs before async_remove_entry in real
         # HA; the adapter/protocol_adapter on runtime_data must still work
         # for depublishing after that unload.
-        await grapevine.async_unload_entry(hass, entry)
+        await saulach.async_unload_entry(hass, entry)
         await entry.async_unload()
 
         mqtt._state(hass).published.clear()
-        await grapevine.async_remove_entry(hass, entry)
+        await saulach.async_remove_entry(hass, entry)
 
     _run(scenario())
 
@@ -210,12 +210,12 @@ def test_remove_entry_is_a_noop_when_setup_never_completed():
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
     # entry.runtime_data is None -- setup never ran (e.g. it failed).
 
-    _run(grapevine.async_remove_entry(hass, entry))  # must not raise
+    _run(saulach.async_remove_entry(hass, entry))  # must not raise
 
     assert mqtt._state(hass).published == []
 
 
-# --- grapevine.depublish_bridge (manual cleanup of a confirmed-dead peer) ---
+# --- saulach.depublish_bridge (manual cleanup of a confirmed-dead peer) ---
 
 _REMOTE_PAYLOAD = {
     "name": "Garage Humidity",
@@ -231,7 +231,7 @@ def test_setup_entry_registers_depublish_bridge_service_once():
     hass = HomeAssistant()
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
 
-    _run(grapevine.async_setup_entry(hass, entry))
+    _run(saulach.async_setup_entry(hass, entry))
 
     assert hass.services.has_service(DOMAIN, SERVICE_DEPUBLISH_BRIDGE)
 
@@ -241,7 +241,7 @@ def test_depublish_bridge_service_clears_remote_bridge_topics_and_entity():
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
 
     async def scenario():
-        await grapevine.async_setup_entry(hass, entry)
+        await saulach.async_setup_entry(hass, entry)
         await mqtt.async_fire_mqtt_message(
             hass,
             "share/homeassistant/sensor/garage_humidity/config",
@@ -274,7 +274,7 @@ def test_depublish_bridge_service_removes_the_device_too():
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
 
     async def scenario():
-        await grapevine.async_setup_entry(hass, entry)
+        await saulach.async_setup_entry(hass, entry)
         await mqtt.async_fire_mqtt_message(
             hass,
             "share/homeassistant/sensor/garage_humidity/config",
@@ -305,7 +305,7 @@ def test_depublish_bridge_service_clears_a_bridge_never_rediscovered_this_sessio
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
 
     async def scenario():
-        await grapevine.async_setup_entry(hass, entry)
+        await saulach.async_setup_entry(hass, entry)
         # Never fires an MQTT message -- simulates an entity that
         # survived purely via registry persistence, unknown to
         # RemoteEntityManager's in-memory bookkeeping this session.
@@ -336,7 +336,7 @@ def test_depublish_bridge_service_clears_a_bridge_never_rediscovered_this_sessio
 def test_depublish_bridge_service_raises_for_unknown_device():
     hass = HomeAssistant()
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
-    _run(grapevine.async_setup_entry(hass, entry))
+    _run(saulach.async_setup_entry(hass, entry))
 
     async def scenario():
         with pytest.raises(ServiceValidationError):
@@ -352,7 +352,7 @@ def test_depublish_bridge_service_raises_for_device_without_bridge_identifier():
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
 
     async def scenario():
-        await grapevine.async_setup_entry(hass, entry)
+        await saulach.async_setup_entry(hass, entry)
         # A device owned by this entry but without a (DOMAIN, bridge_id)
         # identifier -- shouldn't happen in practice, but the service must
         # fail closed rather than guess.
@@ -383,7 +383,7 @@ def test_setup_entry_removes_orphaned_device_with_no_entities():
         name="Bridge Jakob",
     )
 
-    _run(grapevine.async_setup_entry(hass, entry))
+    _run(saulach.async_setup_entry(hass, entry))
 
     assert dr.async_get(hass).async_get(orphan.id) is None
 
@@ -401,7 +401,7 @@ def test_setup_entry_keeps_device_that_still_has_entities():
     )
     er.async_get(hass)._register("sensor.some_remote_bridge_temp", active.id)
 
-    _run(grapevine.async_setup_entry(hass, entry))
+    _run(saulach.async_setup_entry(hass, entry))
 
     assert dr.async_get(hass).async_get(active.id) is not None
 
@@ -415,6 +415,6 @@ def test_setup_entry_does_not_touch_orphaned_devices_from_other_entries():
         name="Other Bridge",
     )
 
-    _run(grapevine.async_setup_entry(hass, entry))
+    _run(saulach.async_setup_entry(hass, entry))
 
     assert dr.async_get(hass).async_get(other_entrys_orphan.id) is not None

@@ -1,4 +1,4 @@
-# Grapevine
+# Saulach Bridge
 
 **Peer-to-peer entity federation for Home Assistant.**
 
@@ -16,7 +16,7 @@ interoperates with instances still running the original blueprint.
   in an MQTT-Discovery-style JSON payload, so other Home Assistant
   instances watching that prefix can pick them up.
 - Subscribes to that same shared prefix and, for entities published by
-  *other* Grapevine instances, creates and maintains native sensor
+  *other* Saulach instances, creates and maintains native sensor
   entities directly in this Home Assistant install — no writes into the
   local MQTT Discovery root, and no orphaned entities left behind:
   removing the integration removes them too.
@@ -45,23 +45,23 @@ Not in HACS's default store yet, so it has to be added manually as a
 custom repository:
 
 1. HACS → the "⋮" menu (top right) → **Custom repositories**.
-2. Repository: `https://github.com/FeHJa/Grapevine`, category:
+2. Repository: `https://github.com/FeHJa/Saulach`, category:
    **Integration**.
-3. Install "Grapevine" from HACS, then restart Home Assistant.
+3. Install "Saulach Bridge" from HACS, then restart Home Assistant.
 4. Settings → Devices & Services → Add Integration → search for
-   "Grapevine".
+   "Saulach Bridge".
 
 ### Manually
 
-1. Copy `custom_components/grapevine/` into your Home Assistant config's
+1. Copy `custom_components/saulach/` into your Home Assistant config's
    `custom_components/` directory.
 2. Restart Home Assistant.
 3. Settings → Devices & Services → Add Integration → search for
-   "Grapevine".
+   "Saulach Bridge".
 
 Requires Home Assistant 2026.7 or newer and a configured MQTT integration.
 
-The integration ships its own icon (`custom_components/grapevine/brand/`),
+The integration ships its own icon (`custom_components/saulach/brand/`),
 picked up automatically by Home Assistant's local brand-icon mechanism
 (2026.3+) — no separate submission to the `home-assistant/brands` repo
 needed.
@@ -80,7 +80,7 @@ Set up via the UI config flow:
 
 ## Services
 
-`grapevine.republish` — forces an immediate full discovery + state
+`saulach.republish` — forces an immediate full discovery + state
 republish for a given bridge instance, without waiting for the next
 scheduled interval.
 

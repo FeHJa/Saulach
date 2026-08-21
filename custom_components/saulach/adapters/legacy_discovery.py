@@ -118,7 +118,7 @@ class LegacyDiscoveryAdapter(ProtocolAdapter):
         # signal -- HA's own mqtt integration (and therefore any
         # blueprint-based receiver forwarding into it) already treats this
         # as "remove this entity"; LegacyDiscoveryAdapter.handle_incoming_message
-        # below teaches Grapevine-based receivers to recognize it too.
+        # below teaches Saulach-based receivers to recognize it too.
         object_id = object_id_from_entity_id(entity_id)
         discovery_topic = f"{self._shared_discovery_prefix}sensor/{object_id}/config"
         state_topic = f"{self._sensor_value_prefix}sensor/{object_id}"
@@ -130,7 +130,7 @@ class LegacyDiscoveryAdapter(ProtocolAdapter):
         # §9: a separate topic tree from §2's discovery/state topics --
         # {prefix}bridge/{slug}/metadata has 3 segments ending in
         # "metadata", so it never matches the {prefix}+/+/config pattern
-        # any receiver (blueprint or Grapevine) subscribes to. Nobody else
+        # any receiver (blueprint or Saulach) subscribes to. Nobody else
         # sees this unless/until they deliberately opt in, so publishing
         # it needs no coordination with the other bridge instances.
         payload = build_metadata_payload(
