@@ -49,6 +49,16 @@
           "description": "Which Grapevine config entry to republish."
         }
       }
+    },
+    "depublish_bridge": {
+      "name": "Depublish bridge",
+      "description": "Permanently retract every entity currently shown for a peer bridge you've confirmed is dead (decommissioned, migrated, etc.) -- clears its retained MQTT messages so it stops reappearing on every restart. Only use this for a bridge you know is no longer publishing; it has no way to tell an inactive bridge from a merely quiet one.",
+      "fields": {
+        "bridge_device": {
+          "name": "Bridge device",
+          "description": "Which bridge device to depublish."
+        }
+      }
     }
   }
 }

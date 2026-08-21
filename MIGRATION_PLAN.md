@@ -336,6 +336,25 @@ present and unfixed, per §5a — this phase doesn't touch them.
   bridge is currently publishing, so this can't delete anything active
   and can't affect entity history (which is already gone once the
   entities themselves are gone).
+- ~~`grapevine.depublish_bridge` service~~ **Done** (issue #12 follow-up):
+  the startup cleanup above only catches a device once it has zero
+  entities, which never happens for a peer whose empty-retained removal
+  signal (§5b) was never actually delivered to us live -- MQTT retains
+  forever, so a merely-cleared-on-the-broker or never-cleared topic just
+  gets redelivered on our next restart, looking exactly like a live
+  bridge. There's no reliable local signal to tell a dead peer from a
+  quiet one, so this isn't automatic: the service takes a bridge device
+  the user names explicitly (device selector in `services.yaml`,
+  Developer Tools → Actions only -- no button entity), and for every
+  entity currently materialized from it, publishes an empty retained
+  payload to its discovery topic (durably clearing the broker, unlike a
+  plain local entity delete) and tears it down locally right away rather
+  than waiting on its own publish looping back. See `PROTOCOL.md` §5c.
+  `RemoteEntityManager`/`__init__.py` resolve the device back to a
+  `RemoteEntityManager` via a small `entry_id -> manager` dict in
+  `hass.data[DOMAIN]`, the same pattern `republish_handlers` already
+  uses, rather than `hass.config_entries.async_get_entry` -- keeps the
+  lookup self-contained the same way the existing republish dispatch is.
 - Broaden test coverage (config flow, scheduler timing) toward CI.
 - `button` entity per config entry that calls `grapevine.republish`.
 - **Multi-entry support** (lower priority — not currently needed, but

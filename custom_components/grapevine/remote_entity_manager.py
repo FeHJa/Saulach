@@ -159,6 +159,31 @@ class RemoteEntityManager:
             for metadata_entity in metadata_entities.entities:
                 await self._async_remove_entity(metadata_entity)
 
+    def topics_for_bridge(self, bridge_id: str) -> list[str]:
+        """Every discovery topic we currently have an entity materialized
+        from, for `bridge_id` -- what grapevine.depublish_bridge needs to
+        clear."""
+        unique_ids = {uid for uid, bid in self._entity_bridge_id.items() if bid == bridge_id}
+        return [topic for topic, uid in self._topic_to_unique_id.items() if uid in unique_ids]
+
+    async def async_depublish_bridge(self, bridge_id: str) -> int:
+        """grapevine.depublish_bridge service: a human has decided
+        `bridge_id` is dead (e.g. a decommissioned peer whose empty
+        retained payload never reached us while we were online to see it,
+        so it keeps reappearing on every restart -- MQTT retains forever
+        otherwise). Publishes an empty retained payload to every topic
+        we've materialized an entity from for this bridge -- the durable
+        fix, since the broker won't redeliver a cleared topic on our next
+        restart -- and tears the entity down locally immediately via the
+        same path an organically-received empty payload would use,
+        rather than waiting for our own publish to loop back to us.
+        Returns how many topics were cleared."""
+        topics = self.topics_for_bridge(bridge_id)
+        for topic in topics:
+            await mqtt_io.async_publish(self._hass, topic, "", retain=True)
+            await self.async_handle_removal(topic)
+        return len(topics)
+
     async def async_handle_remote_metadata(self, bridge_id: str, payload_data: dict) -> None:
         """A metadata message (§9, issue #12) arrived for `bridge_id`.
         Only shown if we already materialized at least one entity from

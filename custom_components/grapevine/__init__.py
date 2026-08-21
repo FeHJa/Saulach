@@ -20,7 +20,14 @@ from homeassistant.helpers import entity_registry as er
 
 from . import mqtt_io
 from .adapters.legacy_discovery import LegacyDiscoveryAdapter
-from .const import ATTR_CONFIG_ENTRY_ID, CONF_ENTITIES, DOMAIN, SERVICE_REPUBLISH
+from .const import (
+    ATTR_BRIDGE_DEVICE,
+    ATTR_CONFIG_ENTRY_ID,
+    CONF_ENTITIES,
+    DOMAIN,
+    SERVICE_DEPUBLISH_BRIDGE,
+    SERVICE_REPUBLISH,
+)
 from .remote_entity_manager import RemoteEntityManager
 from .scheduler import BridgeScheduler
 from .version import integration_version
@@ -30,6 +37,7 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[str] = ["sensor"]
 
 SERVICE_REPUBLISH_SCHEMA = vol.Schema({vol.Required(ATTR_CONFIG_ENTRY_ID): cv.string})
+SERVICE_DEPUBLISH_BRIDGE_SCHEMA = vol.Schema({vol.Required(ATTR_BRIDGE_DEVICE): cv.string})
 
 
 @dataclass
@@ -78,9 +86,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Services are domain-global, not per-entry, so on-demand republish
     # dispatches through a small entry-keyed registry rather than a
     # singleton — this keeps the signature stable when Phase 2 multi-entry
-    # support lands (MIGRATION_PLAN.md Decision 3).
+    # support lands (MIGRATION_PLAN.md Decision 3). depublish_bridge below
+    # needs to go from a device the user picked back to *its* entry's
+    # RemoteEntityManager, so it gets the same treatment rather than
+    # depending on hass.config_entries.async_get_entry/async_entries --
+    # this stays self-contained even before a real config entry add flow
+    # (or its test-harness equivalent) has run.
     handlers = hass.data.setdefault(DOMAIN, {}).setdefault("republish_handlers", {})
     handlers[entry.entry_id] = scheduler.async_republish_all
+    managers = hass.data[DOMAIN].setdefault("remote_entity_managers", {})
+    managers[entry.entry_id] = remote_entity_manager
 
     def _unregister_republish_handler() -> None:
         # Not `lambda: handlers.pop(...)` -- dict.pop() returns the
@@ -91,6 +106,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # so the callback returns None, as every other on_unload
         # callback here does.
         handlers.pop(entry.entry_id, None)
+        managers.pop(entry.entry_id, None)
 
     entry.async_on_unload(_unregister_republish_handler)
 
@@ -100,6 +116,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             SERVICE_REPUBLISH,
             _make_republish_service_handler(hass),
             schema=SERVICE_REPUBLISH_SCHEMA,
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_DEPUBLISH_BRIDGE):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_DEPUBLISH_BRIDGE,
+            _make_depublish_bridge_service_handler(hass),
+            schema=SERVICE_DEPUBLISH_BRIDGE_SCHEMA,
         )
 
     await scheduler.async_setup()
@@ -178,3 +202,41 @@ def _make_republish_service_handler(hass: HomeAssistant):
         handler()
 
     return _async_handle_republish
+
+
+def _find_remote_entity_manager_for_device(hass: HomeAssistant, device_id: str) -> RemoteEntityManager | None:
+    device_registry = dr.async_get(hass)
+    managers: dict[str, RemoteEntityManager] = hass.data.get(DOMAIN, {}).get(
+        "remote_entity_managers", {}
+    )
+    for entry_id, manager in managers.items():
+        owned_devices = dr.async_entries_for_config_entry(device_registry, entry_id)
+        if any(device.id == device_id for device in owned_devices):
+            return manager
+    return None
+
+
+def _make_depublish_bridge_service_handler(hass: HomeAssistant):
+    async def _async_handle_depublish_bridge(call: ServiceCall) -> None:
+        # Never automatic/heuristic -- a human has already decided, by
+        # naming a specific device here, that this peer bridge is dead
+        # (CLAUDE.md §5c). We only act on exactly the entities this
+        # instance currently has materialized for it.
+        device_id = call.data[ATTR_BRIDGE_DEVICE]
+        device_registry = dr.async_get(hass)
+        device = device_registry.async_get(device_id)
+        if device is None:
+            raise ServiceValidationError(f"No such device: {device_id}")
+
+        bridge_id = next((ident for (domain, ident) in device.identifiers if domain == DOMAIN), None)
+        if bridge_id is None:
+            raise ServiceValidationError(f"Device {device_id} is not a Grapevine bridge device")
+
+        manager = _find_remote_entity_manager_for_device(hass, device_id)
+        if manager is None:
+            raise ServiceValidationError(f"No running Grapevine instance owns device {device_id}")
+
+        removed = await manager.async_depublish_bridge(bridge_id)
+        _LOGGER.info("Depublished bridge %s: %d topic(s) cleared", bridge_id, removed)
+
+    return _async_handle_depublish_bridge

@@ -37,6 +37,11 @@ JITTER_MAX_SECONDS = 9
 SERVICE_REPUBLISH = "republish"
 ATTR_CONFIG_ENTRY_ID = "config_entry_id"
 
+# Manual depublish of a dead peer bridge (issue #12/CLAUDE.md §5c) -- never
+# triggered automatically, always a human naming a specific bridge device.
+SERVICE_DEPUBLISH_BRIDGE = "depublish_bridge"
+ATTR_BRIDGE_DEVICE = "bridge_device"
+
 
 def _pattern(word: str) -> re.Pattern[str]:
     return re.compile(rf"(^|_){word}(_|$)", re.IGNORECASE)
