@@ -219,14 +219,24 @@ example bridges did — by external knowledge (migrated, decommissioned, "yes th
 running blueprint"), not by any timeout Grapevine could apply on its own.
 
 Given that human decision, `grapevine.depublish_bridge` (a service, not automatic) takes a
-Grapevine bridge device the user names explicitly. For every entity this instance
-currently has materialized from that device's `bridge_id`, it:
-- publishes an empty retained payload to that entity's own discovery topic (the *same*
-  topic, and the *same* removal convention, as §5b — a receiving Grapevine or
-  blueprint-based instance elsewhere on the shared prefix cannot tell this apart from the
-  origin bridge's own depublish), and
-- immediately tears the entity down locally via the existing §5b removal path, rather
-  than waiting for its own publish to loop back over MQTT.
+Grapevine bridge device the user names explicitly. It reads the *entity registry*, not
+`RemoteEntityManager`'s in-memory bookkeeping, to find that device's entities — the whole
+reason this service exists is that a long-dead peer's entities were never redelivered this
+session (nothing to redeliver: the retained message is already gone), so they have no
+in-memory footprint at all, and show as "Unavailable" in the UI while still sitting in the
+registry. For each one it finds:
+- publishes an empty retained payload to that entity's own discovery topic, reconstructed
+  from its `unique_id` (`{bridge_id}::{entity_id}`, §3) — the *same* topic, and the *same*
+  removal convention, as §5b — a receiving Grapevine or blueprint-based instance elsewhere
+  on the shared prefix cannot tell this apart from the origin bridge's own depublish), and
+- tears it down immediately: through the normal §5b removal path if `RemoteEntityManager`
+  does happen to have it live this session, or directly from the registry otherwise (there
+  is no live entity to remove any other way). Either way it doesn't wait on its own publish
+  to loop back over MQTT.
+
+Diagnostic entities (§9) have no discovery topic of their own — they're removed as a side
+effect once every real entity for the bridge is gone, the same as an organic removal
+(§5a's amendment) already does.
 
 Publishing to a topic this instance didn't originate is unusual but not a protocol
 violation — the shared prefix has no per-topic ownership model, and §5b's removal

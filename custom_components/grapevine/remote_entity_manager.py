@@ -17,8 +17,8 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import mqtt_io
-from .const import DOMAIN, PROTOCOL_VERSION
-from .discovery import domain_from_unique_id
+from .const import CONF_SHARED_DISCOVERY_PREFIX, DOMAIN, PROTOCOL_VERSION
+from .discovery import domain_from_unique_id, object_id_from_entity_id
 from .sensor import BridgedSensorEntity, BridgeMetadataEntities
 
 _LOGGER = logging.getLogger(__name__)
@@ -159,30 +159,55 @@ class RemoteEntityManager:
             for metadata_entity in metadata_entities.entities:
                 await self._async_remove_entity(metadata_entity)
 
-    def topics_for_bridge(self, bridge_id: str) -> list[str]:
-        """Every discovery topic we currently have an entity materialized
-        from, for `bridge_id` -- what grapevine.depublish_bridge needs to
-        clear."""
-        unique_ids = {uid for uid, bid in self._entity_bridge_id.items() if bid == bridge_id}
-        return [topic for topic, uid in self._topic_to_unique_id.items() if uid in unique_ids]
-
-    async def async_depublish_bridge(self, bridge_id: str) -> int:
+    async def async_depublish_bridge(self, bridge_id: str, device_id: str) -> int:
         """grapevine.depublish_bridge service: a human has decided
         `bridge_id` is dead (e.g. a decommissioned peer whose empty
         retained payload never reached us while we were online to see it,
         so it keeps reappearing on every restart -- MQTT retains forever
-        otherwise). Publishes an empty retained payload to every topic
-        we've materialized an entity from for this bridge -- the durable
-        fix, since the broker won't redeliver a cleared topic on our next
-        restart -- and tears the entity down locally immediately via the
-        same path an organically-received empty payload would use,
-        rather than waiting for our own publish to loop back to us.
-        Returns how many topics were cleared."""
-        topics = self.topics_for_bridge(bridge_id)
-        for topic in topics:
+        otherwise). Driven by the *entity registry* for `device_id`, not
+        our own in-memory bookkeeping -- that bookkeeping only knows
+        about entities re-discovered this session, but the entities this
+        service exists for are exactly the ones that show "Unavailable"
+        because nothing has re-discovered them since a previous session
+        (their retained discovery message is long gone). Publishes an
+        empty retained payload to every real bridged entity's own
+        discovery topic -- reconstructed from its unique_id
+        ("{bridge_id}::{entity_id}", §3), the durable fix since the
+        broker won't redeliver a cleared topic on our next restart -- and
+        tears each one down immediately: through the normal
+        async_handle_removal path if it's live this session, or directly
+        from the registry otherwise (nothing live to call .async_remove()
+        on). Diagnostic entities (§9) have no discovery topic of their
+        own; anything still left on the device afterwards -- diagnostics
+        that were never live this session either -- is swept up directly
+        too. Returns how many discovery topics were published to."""
+        entity_registry = er.async_get(self._hass)
+        shared_discovery_prefix = self._entry.data[CONF_SHARED_DISCOVERY_PREFIX]
+        device_entities = list(
+            er.async_entries_for_device(entity_registry, device_id, include_disabled_entities=True)
+        )
+
+        published = 0
+        for reg_entry in device_entities:
+            unique_id = reg_entry.unique_id
+            _, _, suffix = (unique_id or "").partition("::")
+            if "." not in suffix:
+                continue  # diagnostic entity -- no topic of its own, swept up below
+            object_id = object_id_from_entity_id(suffix)
+            topic = f"{shared_discovery_prefix}sensor/{object_id}/config"
             await mqtt_io.async_publish(self._hass, topic, "", retain=True)
-            await self.async_handle_removal(topic)
-        return len(topics)
+            published += 1
+            if unique_id in self._entities:
+                await self.async_handle_removal(topic)
+
+        for reg_entry in device_entities:
+            if entity_registry.async_get(reg_entry.entity_id) is not None:
+                entity_registry.async_remove(reg_entry.entity_id)
+
+        self._remote_metadata_entities.pop(bridge_id, None)
+        self._bridge_entity_counts.pop(bridge_id, None)
+        self._bridge_names.pop(bridge_id, None)
+        return published
 
     async def async_handle_remote_metadata(self, bridge_id: str, payload_data: dict) -> None:
         """A metadata message (§9, issue #12) arrived for `bridge_id`.

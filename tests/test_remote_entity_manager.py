@@ -11,9 +11,10 @@ import asyncio
 from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.grapevine.const import DOMAIN
+from custom_components.grapevine.const import CONF_SHARED_DISCOVERY_PREFIX, DOMAIN
 from custom_components.grapevine.remote_entity_manager import RemoteEntityManager
 
 DISCOVERY_TOPIC = "share/homeassistant/sensor/garage_humidity/config"
@@ -35,18 +36,33 @@ EXAMPLE_PAYLOAD = {
 
 
 def _make_manager(hass: HomeAssistant) -> tuple[RemoteEntityManager, list]:
-    manager = RemoteEntityManager(hass, ConfigEntry())
+    entry = ConfigEntry(
+        entry_id="entry1", data={CONF_SHARED_DISCOVERY_PREFIX: "share/homeassistant/"}
+    )
+    manager = RemoteEntityManager(hass, entry)
     added: list = []
 
     def _add_entities(entities) -> None:
         # Mimics what the real (and fake, in ConfigEntriesRegistry) entity
         # platform does when async_add_entities runs -- assigns hass and
-        # an entity_id before the entity is otherwise usable.
+        # an entity_id before the entity is otherwise usable, and links
+        # it to a device via _attr_device_info the same way the real
+        # entity platform does (needed for async_depublish_bridge, which
+        # is driven by the entity registry, not just in-memory state).
         for entity in entities:
             entity.hass = hass
             entity.entity_id = f"sensor.{entity.unique_id.replace('.', '_').replace(':', '_')}"
             added.append(entity)
-            er.async_get(hass)._register(entity.entity_id)
+            device_id = None
+            device_info = getattr(entity, "_attr_device_info", None) or {}
+            identifiers = device_info.get("identifiers")
+            if identifiers:
+                device_id = dr.async_get(hass).async_get_or_create(
+                    config_entry_id=entry.entry_id,
+                    identifiers=identifiers,
+                    name=device_info.get("name"),
+                ).id
+            er.async_get(hass)._register(entity.entity_id, device_id, entity.unique_id)
 
     manager.set_add_entities_callback(_add_entities)
     return manager, added
@@ -404,6 +420,14 @@ def test_metadata_diagnostic_entities_removed_when_last_entity_removed():
 # --- async_depublish_bridge (grapevine.depublish_bridge service) ---
 
 
+def _device_id(hass: HomeAssistant, entry_id: str, bridge_id: str) -> str:
+    return next(
+        device
+        for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry_id)
+        if (DOMAIN, bridge_id) in device.identifiers
+    ).id
+
+
 def test_depublish_bridge_publishes_empty_retained_to_every_tracked_topic():
     hass = HomeAssistant()
     manager, added = _make_manager(hass)
@@ -416,7 +440,8 @@ def test_depublish_bridge_publishes_empty_retained_to_every_tracked_topic():
         second["state_topic"] = "share/other_bridge/sensor/garage_temperature"
         await manager.async_handle_discovery(second_topic, second)
 
-        return await manager.async_depublish_bridge("other_bridge")
+        device_id = _device_id(hass, "entry1", "other_bridge")
+        return await manager.async_depublish_bridge("other_bridge", device_id)
 
     removed = _run(scenario())
 
@@ -433,7 +458,8 @@ def test_depublish_bridge_removes_entities_locally_immediately():
     async def scenario():
         await manager.async_handle_discovery(DISCOVERY_TOPIC, dict(EXAMPLE_PAYLOAD))
         entity_id = added[0].entity_id
-        await manager.async_depublish_bridge("other_bridge")
+        device_id = _device_id(hass, "entry1", "other_bridge")
+        await manager.async_depublish_bridge("other_bridge", device_id)
         return entity_id
 
     entity_id = _run(scenario())
@@ -451,7 +477,8 @@ def test_depublish_bridge_also_removes_its_diagnostic_entities():
     async def scenario():
         await manager.async_handle_discovery(DISCOVERY_TOPIC, dict(EXAMPLE_PAYLOAD))
         await manager.async_handle_remote_metadata("other_bridge", dict(METADATA_PAYLOAD))
-        await manager.async_depublish_bridge("other_bridge")
+        device_id = _device_id(hass, "entry1", "other_bridge")
+        await manager.async_depublish_bridge("other_bridge", device_id)
 
     _run(scenario())
 
@@ -459,21 +486,19 @@ def test_depublish_bridge_also_removes_its_diagnostic_entities():
     assert hass.states.get("sensor.other_bridge__entity_count") is None
 
 
-def test_depublish_bridge_is_a_noop_for_unknown_bridge_id():
+def test_depublish_bridge_is_a_noop_for_device_with_no_entities():
     hass = HomeAssistant()
     manager, added = _make_manager(hass)
+    empty_device = dr.async_get(hass).async_get_or_create(
+        config_entry_id="entry1",
+        identifiers={(DOMAIN, "ghost_bridge")},
+        name="Ghost Bridge",
+    )
 
-    async def scenario():
-        await manager.async_handle_discovery(DISCOVERY_TOPIC, dict(EXAMPLE_PAYLOAD))
-        return await manager.async_depublish_bridge("some_other_bridge")
-
-    removed = _run(scenario())
+    removed = _run(manager.async_depublish_bridge("ghost_bridge", empty_device.id))
 
     assert removed == 0
     assert mqtt._state(hass).published == []
-    # The unrelated bridge's entity is untouched.
-    assert len(added) == 1
-    assert added[0].unique_id in manager._entities
 
 
 def test_depublish_bridge_does_not_touch_a_different_bridges_entity():
@@ -490,7 +515,8 @@ def test_depublish_bridge_does_not_touch_a_different_bridges_entity():
         third["device"] = {"identifiers": ["third_bridge"], "name": "Bridge Third", "sw_version": "1.0.3"}
         await manager.async_handle_discovery(other_topic, third)
 
-        return await manager.async_depublish_bridge("other_bridge")
+        device_id = _device_id(hass, "entry1", "other_bridge")
+        return await manager.async_depublish_bridge("other_bridge", device_id)
 
     removed = _run(scenario())
 
@@ -498,6 +524,34 @@ def test_depublish_bridge_does_not_touch_a_different_bridges_entity():
     assert len(added) == 2
     assert "third_bridge::sensor.attic_humidity" in manager._entities
     assert "other_bridge::sensor.garage_humidity" not in manager._entities
+
+
+def test_depublish_bridge_removes_a_stale_entity_never_rediscovered_this_session():
+    # The bug report this exists for: an entity that survived a restart
+    # via the entity registry (shown as "Unavailable" in HA) but was
+    # never re-discovered this session -- e.g. its retained discovery
+    # message is long gone from the broker -- has no footprint at all in
+    # RemoteEntityManager's in-memory bookkeeping. The service must still
+    # find and depublish it via the registry alone.
+    hass = HomeAssistant()
+    manager, added = _make_manager(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id="entry1",
+        identifiers={(DOMAIN, "stale_bridge")},
+        name="Bridge Test Jakob",
+    )
+    er.async_get(hass)._register(
+        "sensor.stale_bridge_garage_humidity",
+        device.id,
+        "stale_bridge::sensor.garage_humidity",
+    )
+
+    removed = _run(manager.async_depublish_bridge("stale_bridge", device.id))
+
+    assert removed == 1
+    published = {(topic, payload, retain) for topic, payload, retain in mqtt._state(hass).published}
+    assert ("share/homeassistant/sensor/garage_humidity/config", "", True) in published
+    assert er.async_get(hass).async_get("sensor.stale_bridge_garage_humidity") is None
 
 
 def test_metadata_diagnostic_entities_survive_partial_entity_removal():
