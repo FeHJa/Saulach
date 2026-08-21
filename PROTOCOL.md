@@ -199,7 +199,42 @@ recognize an empty payload on a topic it previously saw a real payload on (corre
 *topic*, not `unique_id`, since an empty payload carries no JSON to read) and remove the
 native entity it created for it.
 
-## 6. Timing / triggers
+## 5c. Amendment: manual depublish of a confirmed-dead peer bridge
+
+**Status: implemented (issue #12 follow-up).** §5b's removal signal only reaches a
+receiver if it's online and subscribed at the exact moment the empty retained payload is
+published. MQTT retains a topic's last payload forever otherwise — a fresh subscribe (e.g.
+every Grapevine restart) redelivers whatever was last retained, indistinguishable from a
+live republish. If the empty payload was never delivered live (receiver offline, or
+whoever decommissioned the peer only cleared the broker's retained store without a client
+actually online to publish-and-be-delivered), the peer's entities keep reappearing on
+every restart even though the source is long gone — no amount of waiting fixes this, since
+nothing is left to eventually send the missing removal signal.
+
+There is no automatic detection for this: MQTT gives a receiver no reliable signal that a
+given peer is dead rather than merely quiet between publishes (unlike a state-change or
+time-pattern republish, silence isn't itself an event). Deciding a specific bridge is dead
+is deliberately left to a human, the same way the person clearing this conversation's six
+example bridges did — by external knowledge (migrated, decommissioned, "yes that's still
+running blueprint"), not by any timeout Grapevine could apply on its own.
+
+Given that human decision, `grapevine.depublish_bridge` (a service, not automatic) takes a
+Grapevine bridge device the user names explicitly. For every entity this instance
+currently has materialized from that device's `bridge_id`, it:
+- publishes an empty retained payload to that entity's own discovery topic (the *same*
+  topic, and the *same* removal convention, as §5b — a receiving Grapevine or
+  blueprint-based instance elsewhere on the shared prefix cannot tell this apart from the
+  origin bridge's own depublish), and
+- immediately tears the entity down locally via the existing §5b removal path, rather
+  than waiting for its own publish to loop back over MQTT.
+
+Publishing to a topic this instance didn't originate is unusual but not a protocol
+violation — the shared prefix has no per-topic ownership model, and §5b's removal
+convention only cares that an empty retained payload arrived, not who sent it. Because the
+broker's retained store is actually cleared this time (not merely cleared-without-anyone-
+subscribed, or never cleared at all), the peer stops reappearing on future restarts too —
+unlike a plain local entity deletion, which would only hide it until the next restart
+redelivers the same stale retained messages.
 
 - State-change on any bridged entity → publish discovery + state for that one entity
 - Time-pattern trigger (every `time_pattern` minutes) → full republish loop over all bridged

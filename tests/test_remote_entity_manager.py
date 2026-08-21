@@ -401,6 +401,105 @@ def test_metadata_diagnostic_entities_removed_when_last_entity_removed():
     assert hass.states.get("sensor.other_bridge__entity_count") is None
 
 
+# --- async_depublish_bridge (grapevine.depublish_bridge service) ---
+
+
+def test_depublish_bridge_publishes_empty_retained_to_every_tracked_topic():
+    hass = HomeAssistant()
+    manager, added = _make_manager(hass)
+    second_topic = "share/homeassistant/sensor/garage_temperature/config"
+
+    async def scenario():
+        await manager.async_handle_discovery(DISCOVERY_TOPIC, dict(EXAMPLE_PAYLOAD))
+        second = dict(EXAMPLE_PAYLOAD)
+        second["unique_id"] = "other_bridge::sensor.garage_temperature"
+        second["state_topic"] = "share/other_bridge/sensor/garage_temperature"
+        await manager.async_handle_discovery(second_topic, second)
+
+        return await manager.async_depublish_bridge("other_bridge")
+
+    removed = _run(scenario())
+
+    assert removed == 2
+    published = {(topic, payload, retain) for topic, payload, retain in mqtt._state(hass).published}
+    assert (DISCOVERY_TOPIC, "", True) in published
+    assert (second_topic, "", True) in published
+
+
+def test_depublish_bridge_removes_entities_locally_immediately():
+    hass = HomeAssistant()
+    manager, added = _make_manager(hass)
+
+    async def scenario():
+        await manager.async_handle_discovery(DISCOVERY_TOPIC, dict(EXAMPLE_PAYLOAD))
+        entity_id = added[0].entity_id
+        await manager.async_depublish_bridge("other_bridge")
+        return entity_id
+
+    entity_id = _run(scenario())
+
+    assert manager._entities == {}
+    assert hass.states.get(entity_id) is None
+    assert er.async_get(hass).async_get(entity_id) is None
+    assert mqtt._state(hass).subscriptions.get("share/other_bridge/sensor/garage_humidity") == []
+
+
+def test_depublish_bridge_also_removes_its_diagnostic_entities():
+    hass = HomeAssistant()
+    manager, added = _make_manager(hass)
+
+    async def scenario():
+        await manager.async_handle_discovery(DISCOVERY_TOPIC, dict(EXAMPLE_PAYLOAD))
+        await manager.async_handle_remote_metadata("other_bridge", dict(METADATA_PAYLOAD))
+        await manager.async_depublish_bridge("other_bridge")
+
+    _run(scenario())
+
+    assert "other_bridge" not in manager._remote_metadata_entities
+    assert hass.states.get("sensor.other_bridge__entity_count") is None
+
+
+def test_depublish_bridge_is_a_noop_for_unknown_bridge_id():
+    hass = HomeAssistant()
+    manager, added = _make_manager(hass)
+
+    async def scenario():
+        await manager.async_handle_discovery(DISCOVERY_TOPIC, dict(EXAMPLE_PAYLOAD))
+        return await manager.async_depublish_bridge("some_other_bridge")
+
+    removed = _run(scenario())
+
+    assert removed == 0
+    assert mqtt._state(hass).published == []
+    # The unrelated bridge's entity is untouched.
+    assert len(added) == 1
+    assert added[0].unique_id in manager._entities
+
+
+def test_depublish_bridge_does_not_touch_a_different_bridges_entity():
+    hass = HomeAssistant()
+    manager, added = _make_manager(hass)
+    other_topic = "share/homeassistant/sensor/attic_humidity/config"
+
+    async def scenario():
+        await manager.async_handle_discovery(DISCOVERY_TOPIC, dict(EXAMPLE_PAYLOAD))
+        third = dict(EXAMPLE_PAYLOAD)
+        third["unique_id"] = "third_bridge::sensor.attic_humidity"
+        third["state_topic"] = "share/third_bridge/sensor/attic_humidity"
+        third["bridge_id"] = "third_bridge"
+        third["device"] = {"identifiers": ["third_bridge"], "name": "Bridge Third", "sw_version": "1.0.3"}
+        await manager.async_handle_discovery(other_topic, third)
+
+        return await manager.async_depublish_bridge("other_bridge")
+
+    removed = _run(scenario())
+
+    assert removed == 1
+    assert len(added) == 2
+    assert "third_bridge::sensor.attic_humidity" in manager._entities
+    assert "other_bridge::sensor.garage_humidity" not in manager._entities
+
+
 def test_metadata_diagnostic_entities_survive_partial_entity_removal():
     hass = HomeAssistant()
     manager, added = _make_manager(hass)

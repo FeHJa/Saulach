@@ -3,6 +3,7 @@ republish service (registered once, dispatched per config entry).
 """
 
 import asyncio
+import json
 
 import pytest
 
@@ -16,6 +17,7 @@ from homeassistant.helpers import entity_registry as er
 from custom_components import grapevine
 from custom_components.grapevine import scheduler as scheduler_module
 from custom_components.grapevine.const import (
+    ATTR_BRIDGE_DEVICE,
     ATTR_CONFIG_ENTRY_ID,
     CONF_BRIDGE_NAME,
     CONF_ENTITIES,
@@ -23,6 +25,7 @@ from custom_components.grapevine.const import (
     CONF_SHARED_DISCOVERY_PREFIX,
     CONF_TIME_PATTERN_MINUTES,
     DOMAIN,
+    SERVICE_DEPUBLISH_BRIDGE,
     SERVICE_REPUBLISH,
 )
 from custom_components.grapevine.adapters.legacy_discovery import LegacyDiscoveryAdapter
@@ -210,6 +213,96 @@ def test_remove_entry_is_a_noop_when_setup_never_completed():
     _run(grapevine.async_remove_entry(hass, entry))  # must not raise
 
     assert mqtt._state(hass).published == []
+
+
+# --- grapevine.depublish_bridge (manual cleanup of a confirmed-dead peer) ---
+
+_REMOTE_PAYLOAD = {
+    "name": "Garage Humidity",
+    "state_topic": "share/other_bridge/sensor/garage_humidity",
+    "unique_id": "other_bridge::sensor.garage_humidity",
+    "bridge_id": "other_bridge",
+    "protocol_version": 1,
+    "device": {"identifiers": ["other_bridge"], "name": "Bridge Other", "sw_version": "1.0.3"},
+}
+
+
+def test_setup_entry_registers_depublish_bridge_service_once():
+    hass = HomeAssistant()
+    entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
+
+    _run(grapevine.async_setup_entry(hass, entry))
+
+    assert hass.services.has_service(DOMAIN, SERVICE_DEPUBLISH_BRIDGE)
+
+
+def test_depublish_bridge_service_clears_remote_bridge_topics_and_entity():
+    hass = HomeAssistant()
+    entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
+
+    async def scenario():
+        await grapevine.async_setup_entry(hass, entry)
+        await mqtt.async_fire_mqtt_message(
+            hass,
+            "share/homeassistant/sensor/garage_humidity/config",
+            json.dumps(_REMOTE_PAYLOAD),
+        )
+        manager = entry.runtime_data.remote_entity_manager
+        entity_id = manager._entities["other_bridge::sensor.garage_humidity"].entity_id
+
+        device = next(
+            device
+            for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+            if (DOMAIN, "other_bridge") in device.identifiers
+        )
+        mqtt._state(hass).published.clear()
+
+        await hass.services.async_call(
+            DOMAIN, SERVICE_DEPUBLISH_BRIDGE, {ATTR_BRIDGE_DEVICE: device.id}
+        )
+        return entity_id
+
+    entity_id = _run(scenario())
+
+    assert hass.states.get(entity_id) is None
+    published = {(topic, payload, retain) for topic, payload, retain in mqtt._state(hass).published}
+    assert ("share/homeassistant/sensor/garage_humidity/config", "", True) in published
+
+
+def test_depublish_bridge_service_raises_for_unknown_device():
+    hass = HomeAssistant()
+    entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
+    _run(grapevine.async_setup_entry(hass, entry))
+
+    async def scenario():
+        with pytest.raises(ServiceValidationError):
+            await hass.services.async_call(
+                DOMAIN, SERVICE_DEPUBLISH_BRIDGE, {ATTR_BRIDGE_DEVICE: "does_not_exist"}
+            )
+
+    _run(scenario())
+
+
+def test_depublish_bridge_service_raises_for_device_without_bridge_identifier():
+    hass = HomeAssistant()
+    entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])
+
+    async def scenario():
+        await grapevine.async_setup_entry(hass, entry)
+        # A device owned by this entry but without a (DOMAIN, bridge_id)
+        # identifier -- shouldn't happen in practice, but the service must
+        # fail closed rather than guess.
+        device = dr.async_get(hass).async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={("unrelated_domain", "x")},
+            name="Not a bridge",
+        )
+        with pytest.raises(ServiceValidationError):
+            await hass.services.async_call(
+                DOMAIN, SERVICE_DEPUBLISH_BRIDGE, {ATTR_BRIDGE_DEVICE: device.id}
+            )
+
+    _run(scenario())
 
 
 def test_setup_entry_removes_orphaned_device_with_no_entities():

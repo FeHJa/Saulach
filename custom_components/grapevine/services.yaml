@@ -5,3 +5,10 @@ republish:
       selector:
         config_entry:
           integration: grapevine
+depublish_bridge:
+  fields:
+    bridge_device:
+      required: true
+      selector:
+        device:
+          integration: grapevine
