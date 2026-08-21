@@ -4,11 +4,11 @@ republish:
       required: true
       selector:
         config_entry:
-          integration: grapevine
+          integration: saulach
 depublish_bridge:
   fields:
     bridge_device:
       required: true
       selector:
         device:
-          integration: grapevine
+          integration: saulach

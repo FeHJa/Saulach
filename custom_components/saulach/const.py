@@ -1,4 +1,4 @@
-"""Constants for Grapevine — peer-to-peer entity federation for Home
+"""Constants for Saulach — peer-to-peer entity federation for Home
 Assistant.
 
 Values here are the wire-protocol contract reverse-engineered in
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-DOMAIN = "grapevine"
+DOMAIN = "saulach"
 
 # Config entry keys (PROTOCOL.md §1). local_discovery_prefix is
 # deliberately absent -- it existed only to support forwarding into HA's

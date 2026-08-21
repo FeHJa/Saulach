@@ -1,7 +1,7 @@
 """Config flow — maps the blueprint's inputs (PROTOCOL.md §1) onto a config
 entry. Two flows: initial setup (async_step_user) and a single consolidated
 "Configure" flow for everything editable afterwards -- entities, both
-prefixes, bridge name, and the republish interval (GrapevineOptionsFlow,
+prefixes, bridge name, and the republish interval (SaulachOptionsFlow,
 issue #7). These used to be split across "Configure" (options-only) and a
 separate "Reconfigure" action, but that split wasn't discoverable in
 practice -- see issue #7's reopening."""
@@ -71,7 +71,7 @@ def _options_schema(current_data: dict[str, Any], current_options: dict[str, Any
     )
 
 
-class GrapevineConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class SaulachConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
@@ -118,11 +118,11 @@ class GrapevineConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
-    ) -> GrapevineOptionsFlow:
-        return GrapevineOptionsFlow()
+    ) -> SaulachOptionsFlow:
+        return SaulachOptionsFlow()
 
 
-class GrapevineOptionsFlow(config_entries.OptionsFlow):
+class SaulachOptionsFlow(config_entries.OptionsFlow):
     """The single "Configure" flow for an existing entry -- entities, both
     prefixes, bridge name, and the republish interval all live here. Does
     not set self.config_entry in __init__: that's deprecated as of HA

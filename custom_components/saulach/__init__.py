@@ -1,4 +1,4 @@
-"""Grapevine — peer-to-peer entity federation for Home Assistant.
+"""Saulach — peer-to-peer entity federation for Home Assistant.
 
 A native integration port of the MQTT bridge blueprint. See PROTOCOL.md
 for the wire-protocol contract this must reproduce, and MIGRATION_PLAN.md
@@ -41,7 +41,7 @@ SERVICE_DEPUBLISH_BRIDGE_SCHEMA = vol.Schema({vol.Required(ATTR_BRIDGE_DEVICE): 
 
 
 @dataclass
-class GrapevineRuntimeData:
+class SaulachRuntimeData:
     scheduler: BridgeScheduler
     remote_entity_manager: RemoteEntityManager
     protocol_adapter: LegacyDiscoveryAdapter
@@ -63,14 +63,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     remote_entity_manager = RemoteEntityManager(hass, entry)
     adapter = LegacyDiscoveryAdapter(hass, entry, remote_entity_manager, version)
     scheduler = BridgeScheduler(hass, entry, adapter)
-    entry.runtime_data = GrapevineRuntimeData(
+    entry.runtime_data = SaulachRuntimeData(
         scheduler=scheduler,
         remote_entity_manager=remote_entity_manager,
         protocol_adapter=adapter,
         integration_version=version,
     )
     entry.async_on_unload(remote_entity_manager.async_unload)
-    # GrapevineOptionsFlow's single "Configure" step (data and options
+    # SaulachOptionsFlow's single "Configure" step (data and options
     # fields alike) goes through hass.config_entries.async_update_entry,
     # which is what fires this (issue #7; previously nothing reloaded the
     # entry after a change).
@@ -144,10 +144,10 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     # async_unload_entry above via the platform unload, which HA calls
     # before this. This is the sending-side half (issue #7): depublish
     # every entity this bridge was publishing, so other instances --
-    # Grapevine or blueprint -- don't keep it around as a stale entity
+    # Saulach or blueprint -- don't keep it around as a stale entity
     # forever. Uses the same async_depublish_entity as the options flow's
     # per-entity removal.
-    runtime_data: GrapevineRuntimeData | None = entry.runtime_data
+    runtime_data: SaulachRuntimeData | None = entry.runtime_data
     if runtime_data is None:
         return
     for entity_id in entry.data.get(CONF_ENTITIES, []):
@@ -198,7 +198,7 @@ def _make_republish_service_handler(hass: HomeAssistant):
         handlers = hass.data.get(DOMAIN, {}).get("republish_handlers", {})
         handler = handlers.get(entry_id)
         if handler is None:
-            raise ServiceValidationError(f"No Grapevine instance for config entry {entry_id}")
+            raise ServiceValidationError(f"No Saulach instance for config entry {entry_id}")
         handler()
 
     return _async_handle_republish
@@ -230,11 +230,11 @@ def _make_depublish_bridge_service_handler(hass: HomeAssistant):
 
         bridge_id = next((ident for (domain, ident) in device.identifiers if domain == DOMAIN), None)
         if bridge_id is None:
-            raise ServiceValidationError(f"Device {device_id} is not a Grapevine bridge device")
+            raise ServiceValidationError(f"Device {device_id} is not a Saulach bridge device")
 
         manager = _find_remote_entity_manager_for_device(hass, device_id)
         if manager is None:
-            raise ServiceValidationError(f"No running Grapevine instance owns device {device_id}")
+            raise ServiceValidationError(f"No running Saulach instance owns device {device_id}")
 
         removed = await manager.async_depublish_bridge(bridge_id, device_id)
         # Every entity async_depublish_bridge knew about for this device

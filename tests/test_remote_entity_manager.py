@@ -14,8 +14,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.grapevine.const import CONF_SHARED_DISCOVERY_PREFIX, DOMAIN
-from custom_components.grapevine.remote_entity_manager import RemoteEntityManager
+from custom_components.saulach.const import CONF_SHARED_DISCOVERY_PREFIX, DOMAIN
+from custom_components.saulach.remote_entity_manager import RemoteEntityManager
 
 DISCOVERY_TOPIC = "share/homeassistant/sensor/garage_humidity/config"
 
@@ -417,7 +417,7 @@ def test_metadata_diagnostic_entities_removed_when_last_entity_removed():
     assert hass.states.get("sensor.other_bridge__entity_count") is None
 
 
-# --- async_depublish_bridge (grapevine.depublish_bridge service) ---
+# --- async_depublish_bridge (saulach.depublish_bridge service) ---
 
 
 def _device_id(hass: HomeAssistant, entry_id: str, bridge_id: str) -> str:

@@ -64,7 +64,7 @@ class ConfigEntry:
 class ConfigEntriesRegistry:
     """Test double for hass.config_entries — the unique_id collision check
     config_flow.py relies on, entity-platform forward/unload so
-    custom_components.grapevine.sensor's async_setup_entry can be driven
+    custom_components.saulach.sensor's async_setup_entry can be driven
     the same way real HA drives it, and update/reload plumbing so
     options-flow changes can be tested end-to-end across a real reload
     (issue #7)."""
@@ -114,14 +114,14 @@ class ConfigEntriesRegistry:
         entry = self.async_get_entry(entry_id)
         if entry is None:
             return False
-        integration = importlib.import_module("custom_components.grapevine")
+        integration = importlib.import_module("custom_components.saulach")
         await integration.async_unload_entry(self._hass, entry)
         await entry.async_unload()
         return await integration.async_setup_entry(self._hass, entry)
 
     async def async_forward_entry_setups(self, entry: ConfigEntry, platforms: Iterable[str]) -> None:
         for platform in platforms:
-            module = importlib.import_module(f"custom_components.grapevine.{platform}")
+            module = importlib.import_module(f"custom_components.saulach.{platform}")
             key = (entry.entry_id, platform)
             self._platform_entities.setdefault(key, [])
             await module.async_setup_entry(self._hass, entry, self._make_add_entities(key))

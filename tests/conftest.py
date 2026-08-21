@@ -1,14 +1,14 @@
 """Test bootstrap.
 
 Puts tests/ha_stubs on sys.path *before* anything imports `homeassistant`,
-so `custom_components.grapevine` (whose __init__.py is the real HA
+so `custom_components.saulach` (whose __init__.py is the real HA
 integration entrypoint, importing homeassistant/voluptuous) can be
 imported normally in this sandbox, which has no working real
 `homeassistant` install matching our 2026.7 core floor. See
 tests/ha_stubs/homeassistant/__init__.py and requirements_test.txt for
 what this stub is and is not.
 
-Also puts the repo root on sys.path so `custom_components.grapevine`
+Also puts the repo root on sys.path so `custom_components.saulach`
 resolves as a namespace package.
 """
 

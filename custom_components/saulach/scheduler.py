@@ -90,7 +90,7 @@ class BridgeScheduler:
     def _schedule_publish(self, entity_id: str, state: State) -> None:
         task = self._hass.async_create_background_task(
             self._jittered_publish(entity_id, state),
-            name=f"grapevine publish {entity_id}",
+            name=f"saulach publish {entity_id}",
         )
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -105,7 +105,7 @@ class BridgeScheduler:
     def _schedule_metadata_publish(self) -> None:
         task = self._hass.async_create_background_task(
             self._jittered_metadata_publish(),
-            name="grapevine publish metadata",
+            name="saulach publish metadata",
         )
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)

@@ -1,4 +1,4 @@
-"""Fake of the handful of homeassistant.const symbols grapevine imports."""
+"""Fake of the handful of homeassistant.const symbols saulach imports."""
 
 from __future__ import annotations
 

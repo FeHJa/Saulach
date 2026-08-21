@@ -16,16 +16,16 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 
-from custom_components import grapevine
-from custom_components.grapevine import scheduler as scheduler_module
-from custom_components.grapevine.const import (
+from custom_components import saulach
+from custom_components.saulach import scheduler as scheduler_module
+from custom_components.saulach.const import (
     CONF_BRIDGE_NAME,
     CONF_ENTITIES,
     CONF_SENSOR_VALUE_PREFIX,
     CONF_SHARED_DISCOVERY_PREFIX,
     CONF_TIME_PATTERN_MINUTES,
 )
-from custom_components.grapevine.sensor import BridgeMetadataEntities
+from custom_components.saulach.sensor import BridgeMetadataEntities
 
 
 @pytest.fixture(autouse=True)
@@ -49,7 +49,7 @@ def test_metadata_entities_share_one_device():
     )
 
     for entity in entities.entities:
-        assert entity._attr_device_info["identifiers"] == {("grapevine", "bridge_jakob")}
+        assert entity._attr_device_info["identifiers"] == {("saulach", "bridge_jakob")}
         assert entity._attr_device_info["name"] == "Bridge Jakob"
 
 
@@ -111,7 +111,7 @@ def test_setup_entry_creates_no_own_bridge_diagnostic_entities():
     hass.states.async_set("sensor.a", "1")
 
     async def scenario():
-        await grapevine.async_setup_entry(hass, entry)
+        await saulach.async_setup_entry(hass, entry)
         await _drain_hass_tasks(hass)
 
     _run(scenario())

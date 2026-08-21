@@ -1,4 +1,4 @@
-"""GrapevineOptionsFlow (issue #7), exercised against the real
+"""SaulachOptionsFlow (issue #7), exercised against the real
 async_setup_entry/async_unload_entry/async_reload path so "did the change
 actually take effect" is genuinely tested, not just "did the flow return
 the right dict." This flow is the sole "Configure" entry point -- entities,
@@ -15,10 +15,10 @@ from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from custom_components import grapevine
-from custom_components.grapevine import scheduler as scheduler_module
-from custom_components.grapevine.config_flow import GrapevineOptionsFlow
-from custom_components.grapevine.const import (
+from custom_components import saulach
+from custom_components.saulach import scheduler as scheduler_module
+from custom_components.saulach.config_flow import SaulachOptionsFlow
+from custom_components.saulach.const import (
     CONF_BRIDGE_NAME,
     CONF_ENTITIES,
     CONF_SENSOR_VALUE_PREFIX,
@@ -57,8 +57,8 @@ async def _drain_hass_tasks(hass: HomeAssistant) -> None:
         await asyncio.gather(*list(hass._tasks), return_exceptions=True)
 
 
-def _options_flow(hass: HomeAssistant, entry: ConfigEntry) -> GrapevineOptionsFlow:
-    flow = GrapevineOptionsFlow()
+def _options_flow(hass: HomeAssistant, entry: ConfigEntry) -> SaulachOptionsFlow:
+    flow = SaulachOptionsFlow()
     flow.hass = hass
     flow.config_entry = entry
     return flow
@@ -137,7 +137,7 @@ def test_options_flow_keeping_same_bridge_name_does_not_self_collide():
     hass.config_entries.entries.append(entry)
 
     async def scenario():
-        await grapevine.async_setup_entry(hass, entry)
+        await saulach.async_setup_entry(hass, entry)
         await _drain_hass_tasks(hass)
 
         flow = _options_flow(hass, entry)
@@ -156,7 +156,7 @@ def test_options_flow_updates_entities_and_reloads():
     hass.states.async_set("sensor.c", "3")
 
     async def scenario():
-        await grapevine.async_setup_entry(hass, entry)
+        await saulach.async_setup_entry(hass, entry)
         await _drain_hass_tasks(hass)
 
         flow = _options_flow(hass, entry)
@@ -181,7 +181,7 @@ def test_options_flow_removing_entity_depublishes_it_before_reload():
     hass.states.async_set("sensor.b", "2")
 
     async def scenario():
-        await grapevine.async_setup_entry(hass, entry)
+        await saulach.async_setup_entry(hass, entry)
         await _drain_hass_tasks(hass)
         mqtt._state(hass).published.clear()
 
@@ -204,7 +204,7 @@ def test_options_flow_change_updates_options_and_actually_reloads():
     hass.config_entries.entries.append(entry)
 
     async def scenario():
-        await grapevine.async_setup_entry(hass, entry)
+        await saulach.async_setup_entry(hass, entry)
         await _drain_hass_tasks(hass)
         assert entry.runtime_data.scheduler._minutes == 1
 

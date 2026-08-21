@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Set up Grapevine",
+        "title": "Set up Saulach Bridge",
         "data": {
           "bridge_name": "Bridge name",
           "entities": "Entities to bridge",
@@ -23,7 +23,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Grapevine options",
+        "title": "Saulach Bridge options",
         "data": {
           "bridge_name": "Bridge name",
           "entities": "Entities to bridge",
@@ -46,7 +46,7 @@
       "fields": {
         "config_entry_id": {
           "name": "Bridge instance",
-          "description": "Which Grapevine config entry to republish."
+          "description": "Which Saulach config entry to republish."
         }
       }
     },
