@@ -87,8 +87,23 @@ def test_creates_entity_on_first_discovery():
     assert entity._attr_device_info == {
         "identifiers": {(DOMAIN, "other_bridge")},
         "name": "Bridge Other",
-        "sw_version": "1.0.3",
     }
+
+
+def test_device_info_omits_sw_version_despite_payload_carrying_one():
+    # The incoming payload's device.sw_version is always the wire
+    # protocol's fixed legacy constant (PROTOCOL.md §3's SW_VERSION,
+    # "1.0.3"), not a peer's actual release version -- showing it here
+    # would fight BridgeMetadataEntities for the same device's sw_version
+    # field, and since ordinary discovery fires far more often than
+    # metadata, the meaningless "1.0.3" kept winning and hiding the real
+    # version.
+    hass = HomeAssistant()
+    manager, added = _make_manager(hass)
+
+    _run(manager.async_handle_discovery(DISCOVERY_TOPIC, dict(EXAMPLE_PAYLOAD)))
+
+    assert "sw_version" not in added[0]._attr_device_info
 
 
 def test_subscribes_to_state_topic_on_first_discovery():

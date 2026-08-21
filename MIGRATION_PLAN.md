@@ -369,6 +369,18 @@ present and unfixed, per §5a — this phase doesn't touch them.
   entry directly (nothing live to call `.async_remove()` on). Also now
   removes the device itself once its entities are gone, rather than
   waiting for the next startup's #18 cleanup pass to catch it.
+- ~~Remote bridge device showing "Firmware 1.0.3" instead of its real
+  version~~ **Done**: `BridgedSensorEntity` was setting the remote device's
+  `sw_version` from the incoming discovery payload's `device.sw_version`
+  — always the wire protocol's fixed legacy constant (§3's `SW_VERSION`),
+  not a peer's actual release. Home Assistant's device registry keeps
+  whichever entity most recently supplied `sw_version` for a device, and
+  since ordinary discovery fires on every state change (far more often
+  than `BridgeMetadataEntities`' once-per-`time_pattern`-tick updates
+  with the real `integration_version`), the meaningless `"1.0.3"` kept
+  winning and permanently hid the real version. `BridgedSensorEntity` no
+  longer sets `sw_version` at all -- see `PROTOCOL.md` §9's new
+  amendment.
 - Broaden test coverage (config flow, scheduler timing) toward CI.
 - `button` entity per config entry that calls `saulach.republish`.
 - **Multi-entry support** (lower priority — not currently needed, but

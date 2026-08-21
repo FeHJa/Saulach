@@ -70,7 +70,6 @@ class RemoteEntityManager:
         device = payload_data.get("device") or {}
         device_identifiers = {(DOMAIN, ident) for ident in device.get("identifiers", [])}
         device_name = device.get("name")
-        device_sw_version = device.get("sw_version")
         bridge_id = next(iter(device.get("identifiers", [])), None)
 
         existing = self._entities.get(unique_id)
@@ -81,7 +80,6 @@ class RemoteEntityManager:
                 unit_of_measurement=unit_of_measurement,
                 device_identifiers=device_identifiers,
                 device_name=device_name,
-                device_sw_version=device_sw_version,
             )
             self._topic_to_unique_id[topic] = unique_id
             if bridge_id is not None:
@@ -95,7 +93,6 @@ class RemoteEntityManager:
             unit_of_measurement=unit_of_measurement,
             device_identifiers=device_identifiers,
             device_name=device_name,
-            device_sw_version=device_sw_version,
         )
 
         if self._add_entities_callback is None:
