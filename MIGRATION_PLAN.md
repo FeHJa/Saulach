@@ -323,7 +323,7 @@ present and unfixed, per §5a — this phase doesn't touch them.
   (`hacs.json`, versioning)~~ **Done**: config-flow/options/service strings
   are all in `strings.json`/`translations/en.json`; `hacs.json` and
   `manifest.json` are in place; the integration has shipped 8 versions
-  (`0.1.0` through `0.1.8`) through real releases.
+  (`0.1.0` through `0.1.10`) through real releases.
 - ~~Rename to Saulach Bridge~~ **Done**: both the integration (`DOMAIN`,
   package folder, class names, user-facing strings) and later the GitHub
   repository itself were renamed from Grapevine to Saulach/Saulach Bridge.

@@ -4,7 +4,7 @@
 
 **Peer-to-peer entity federation for Home Assistant.**
 
-**Version: 0.1.8** — in active production use, federating multiple real
+**Version: 0.1.10** — in active production use, federating multiple real
 Home Assistant instances over a real MQTT broker.
 
 A native Home Assistant custom integration that bridges entities between
@@ -54,8 +54,9 @@ installs, some still running the original blueprint automation, federate
 over a shared broker today without behavior changes on the blueprint side.
 Several real issues surfaced this way and were fixed (blocking I/O on
 setup, `device_class` mismatches crashing receivers, entity/device cleanup
-gaps, MQTT retained-message staleness) — see `MIGRATION_PLAN.md`'s
-Decisions section and `PROTOCOL.md`'s §5b/§5c/§9 amendments for the
+gaps, crashes on a bridged entity's source going unavailable, stale
+retained state values replayed on reconnect) — see `MIGRATION_PLAN.md`'s
+Decisions section and `PROTOCOL.md`'s §4/§5b/§5c/§9 amendments for the
 details.
 
 Acceptance testing happens by running this in production and fixing what
