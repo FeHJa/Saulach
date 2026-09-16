@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
+from homeassistant.const import EntityCategory, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -61,7 +61,22 @@ class BridgedSensorEntity(SensorEntity):
         }
 
     def set_native_value(self, value: str) -> None:
-        self._attr_native_value = value
+        # issue #27: a bridged entity's own source can go unavailable on
+        # the *other* end -- the raw MQTT payload is then the literal
+        # string "unavailable" (or "unknown"), not a real reading. Writing
+        # that straight into native_value crashed HA core's numeric
+        # coercion for any sensor with a numeric device_class (temperature,
+        # humidity, ...): a non-None string value on such a sensor is
+        # always assumed to be a real number. HA's own convention is to
+        # signal "no value" via native_value=None and "not available" via
+        # the `available` property, never via a literal sentinel string --
+        # translate the wire's sentinel into that before writing state.
+        if value in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            self._attr_native_value = None
+            self._attr_available = value != STATE_UNAVAILABLE
+        else:
+            self._attr_native_value = value
+            self._attr_available = True
         self.async_write_ha_state()
 
     def update_from_discovery(

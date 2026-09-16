@@ -40,6 +40,7 @@ class SensorEntity:
     _attr_device_class: str | None = None
     _attr_native_unit_of_measurement: str | None = None
     _attr_native_value: str | None = None
+    _attr_available: bool = True
     _attr_device_info: dict | None = None
     _attr_entity_category: EntityCategory | None = None
 
@@ -53,6 +54,10 @@ class SensorEntity:
     @property
     def native_value(self) -> str | None:
         return self._attr_native_value
+
+    @property
+    def available(self) -> bool:
+        return self._attr_available
 
     async def async_added_to_hass(self) -> None:
         pass
@@ -72,9 +77,17 @@ class SensorEntity:
     def async_write_ha_state(self) -> None:
         if self.hass is None or self.entity_id is None:
             return
+        # Real HA writes the literal "unavailable" state string when an
+        # entity's `available` is False, skipping numeric device_class
+        # coercion entirely -- unlike a *value* that happens to equal the
+        # string "unavailable", which real HA does try to coerce (see
+        # issue #27).
+        state = "unavailable" if not self._attr_available else (
+            "" if self._attr_native_value is None else str(self._attr_native_value)
+        )
         self.hass.states.async_set(
             self.entity_id,
-            "" if self._attr_native_value is None else str(self._attr_native_value),
+            state,
             {
                 "friendly_name": self._attr_name,
                 "device_class": self._attr_device_class,

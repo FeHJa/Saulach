@@ -112,8 +112,71 @@ specific, entity.
 
 ## 4. State payload
 
-Raw state string only (no JSON wrapping), published retained to the state topic. Uses
+Raw state string only (no JSON wrapping), published to the state topic. Uses
 `trigger.to_state.state` on state-triggered publishes (cheaper than re-reading `states()`).
+This was originally published retained, same as the discovery topic — see the issue #29
+amendment below for why that changed.
+
+**Amendment: receiving side must translate `unavailable`/`unknown` (issue #27).** A bridged
+entity's own source can legitimately go unavailable — `trigger.to_state.state` is then the
+literal string `"unavailable"` (HA's own sentinel), or `"unknown"`. This isn't a wire
+change (a compliant sender was always going to publish whatever `to_state.state` was, sentinel
+or not), but a receiving Saulach instance's native materialization (§5a) must not write that
+literal string into a native entity's value: Home Assistant only recognizes "no value" via
+`native_value = None`, and "not available" via the `available` property — never via a
+literal string equal to `"unavailable"`. A sensor with a numeric `device_class` (temperature,
+humidity, ...) assumes any non-`None` value is a real number, so writing the raw sentinel
+string crashed HA core's coercion. `BridgedSensorEntity.set_native_value` now maps
+`"unavailable"` → `native_value = None`, `available = False`, and `"unknown"` →
+`native_value = None`, `available = True` (still available, just no current reading), before
+ever calling `async_write_ha_state()` — a purely local, receiving-side interpretation, same
+shape as §5a/§9's other receiving-side amendments.
+
+**Amendment: state publishes are no longer retained (issue #29).** Unlike every other
+amendment in this section, this one *is* a wire behavior change on the sending side — the
+original blueprint, and Phase 1 of this integration up to this point, published the state
+topic with `retain=True`, same as the discovery topic. That retained value is exactly what
+`§6`'s time_pattern republish and startup resync rely on to survive a broker/receiver
+restart without waiting for the next real state change. The problem: a retained message is
+redelivered verbatim to *any* fresh subscriber — a receiver reconnecting to the broker, or
+restarting — indistinguishable on the wire from a live republish. A receiver that treats
+incoming state as a delta or feeds it into an accumulator (rather than simply displaying the
+latest value, which is all this protocol's own receivers — MQTT Discovery sensors and
+`BridgedSensorEntity`, §5a — ever did with it) sees that redelivery as a real new event and
+double-counts it. Nothing downstream of the wire protocol is specified as delta/accumulator
+consumption today, but nothing about "raw state string, retained" rules it out either, and
+a consumer built that way has no way to distinguish a stale replay from a fresh publish.
+State-topic publishes now use `retain=False`; the discovery topic (§2/§3) is untouched and
+stays retained — a receiver still only needs to see it once per session to create the
+entity, and it carries no per-tick value to go stale. This does mean a receiver that
+(re)subscribes between state publishes sees no value at all until the next one arrives —
+in the worst case, up to one `time_pattern` interval — instead of the old retained value.
+That gap is an accepted tradeoff for correctness on the delta/accumulator side; nothing
+about a plain last-value display (MQTT Discovery sensor, or `BridgedSensorEntity`) depends
+on the topic being retained in between.
+
+**Why this doesn't need coordinating with the other two bridge instances** (unlike §8's
+Phase 3 redesign): `retain` is a broker-delivery flag, not part of the payload or topic
+shape either side parses — nothing in the blueprint's automation, or in `RemoteEntityManager`,
+branches on whether a state message arrived retained or live. Dropping it only changes
+*when* a subscriber sees a value (immediately from the broker's retained store vs. waiting
+for the next publish), never what it parses out of one once it arrives. A receiver on either
+side of this protocol keeps working exactly as before, just without a stale initial replay.
+
+**Migration cleanup (issue #29):** a broker's retained store keeps whatever was last
+published on a topic *forever*, independent of what future publishes do — publishing a new,
+non-retained message does **not** clear a previously-retained one already sitting on that
+topic. Every state value this integration published before this fix is still retained on
+the broker and will keep being redelivered to any fresh subscriber until explicitly cleared.
+`LegacyDiscoveryAdapter.async_clear_retained_state` publishes an empty retained payload
+(the same removal primitive as `async_depublish_entity`, §5b) to each bridged entity's state
+topic — clearing the stale value without touching that entity's still-retained discovery
+topic. `async_setup_entry` runs this for every currently-bridged entity on every startup,
+before the scheduler's own startup full-republish (§6): unconditional and idempotent by
+design (once the retained value is already gone, this is a no-op republish of "still
+empty"), rather than a one-shot migration flag — simpler, and self-healing if a stale
+retained value ever reappears (e.g. a downed receiver that only reconnects to the broker
+after this instance's own cleanup already ran once).
 
 ## 5. Incoming discovery handling (federation from other instances)
 
@@ -269,7 +332,10 @@ before reintroducing this in Phase 3.
 ## 8. Forward compatibility: Phase 3 target design (named, not implemented)
 
 Phase 1 reproduces the blueprint's MQTT-Discovery-emulation protocol exactly, as specified
-above, with no wire changes. However, a target design for a future protocol generation has
+above — with one exception, §4's issue #29 amendment dropping `retain` on state-topic
+publishes, which is a deliberate, backward-compatible deviation (see that amendment for why
+it doesn't require coordinating with the other instances). Otherwise, no wire changes.
+However, a target design for a future protocol generation has
 been identified and is documented here so it doesn't need to be rediscovered later. It is
 **not implemented in Phase 1 or Phase 2**, and is gated on coordinating a rollout with the
 other two bridge instances — do not build it unprompted.

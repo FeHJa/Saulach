@@ -110,8 +110,16 @@ class LegacyDiscoveryAdapter(ProtocolAdapter):
         state_topic = f"{self._sensor_value_prefix}sensor/{object_id}"
 
         await mqtt_io.async_publish(self._hass, discovery_topic, json.dumps(payload), retain=True)
-        # PROTOCOL.md §4: raw state string, no JSON wrapping.
-        await mqtt_io.async_publish(self._hass, state_topic, state.state, retain=True)
+        # PROTOCOL.md §4 (issue #29 amendment): raw state string, no JSON
+        # wrapping, and NOT retained -- a retained state value is replayed
+        # verbatim to every fresh subscriber (broker reconnect, receiver
+        # restart), which is indistinguishable from a live republish to a
+        # delta/accumulator consumer on the far side. Discovery stays
+        # retained (a receiver needs it once per session, not every
+        # reconnect) -- see async_clear_retained_state below for cleaning
+        # up values already retained by a pre-fix version of this
+        # integration.
+        await mqtt_io.async_publish(self._hass, state_topic, state.state, retain=False)
 
     async def async_depublish_entity(self, entity_id: str) -> None:
         # Empty retained payload is the standard MQTT Discovery removal
@@ -124,6 +132,20 @@ class LegacyDiscoveryAdapter(ProtocolAdapter):
         state_topic = f"{self._sensor_value_prefix}sensor/{object_id}"
 
         await mqtt_io.async_publish(self._hass, discovery_topic, "", retain=True)
+        await mqtt_io.async_publish(self._hass, state_topic, "", retain=True)
+
+    async def async_clear_retained_state(self, entity_id: str) -> None:
+        """Issue #29 migration cleanup: clear any stale retained value a
+        pre-fix version of this integration left on this entity's state
+        topic. Publishing an empty retained payload is the same removal
+        primitive async_depublish_entity uses -- it clears the broker's
+        retained store for that topic without touching the (still
+        retained, unaffected) discovery topic. Safe to call unconditionally
+        on every startup: once the retained value is already gone, this is
+        a no-op republish of "still empty".
+        """
+        object_id = object_id_from_entity_id(entity_id)
+        state_topic = f"{self._sensor_value_prefix}sensor/{object_id}"
         await mqtt_io.async_publish(self._hass, state_topic, "", retain=True)
 
     async def async_publish_metadata(self, entity_count: int) -> dict:

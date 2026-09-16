@@ -132,6 +132,90 @@ def test_state_message_updates_entity_native_value_and_ha_state():
     assert hass.states.get(entity.entity_id).state == "55"
 
 
+# --- unavailable/unknown sentinel state payloads (issue #27) ---
+
+
+def test_state_message_unavailable_marks_entity_unavailable_not_a_literal_value():
+    hass = HomeAssistant()
+    manager, added = _make_manager(hass)
+
+    async def scenario():
+        await manager.async_handle_discovery(DISCOVERY_TOPIC, dict(EXAMPLE_PAYLOAD))
+        await mqtt.async_fire_mqtt_message(
+            hass, "share/other_bridge/sensor/garage_humidity", "unavailable"
+        )
+
+    _run(scenario())
+
+    entity = added[0]
+    assert entity.native_value is None
+    assert entity.available is False
+    assert hass.states.get(entity.entity_id).state == "unavailable"
+
+
+def test_state_message_unknown_marks_entity_available_with_no_value():
+    hass = HomeAssistant()
+    manager, added = _make_manager(hass)
+
+    async def scenario():
+        await manager.async_handle_discovery(DISCOVERY_TOPIC, dict(EXAMPLE_PAYLOAD))
+        await mqtt.async_fire_mqtt_message(
+            hass, "share/other_bridge/sensor/garage_humidity", "unknown"
+        )
+
+    _run(scenario())
+
+    entity = added[0]
+    assert entity.native_value is None
+    assert entity.available is True
+
+
+def test_state_message_recovers_after_unavailable():
+    hass = HomeAssistant()
+    manager, added = _make_manager(hass)
+
+    async def scenario():
+        await manager.async_handle_discovery(DISCOVERY_TOPIC, dict(EXAMPLE_PAYLOAD))
+        await mqtt.async_fire_mqtt_message(
+            hass, "share/other_bridge/sensor/garage_humidity", "unavailable"
+        )
+        await mqtt.async_fire_mqtt_message(
+            hass, "share/other_bridge/sensor/garage_humidity", "55"
+        )
+
+    _run(scenario())
+
+    entity = added[0]
+    assert entity.native_value == "55"
+    assert entity.available is True
+    assert hass.states.get(entity.entity_id).state == "55"
+
+
+def test_discovery_redelivery_after_unavailable_state_does_not_resurrect_stale_value():
+    # issue #27's second traceback: a discovery/config redelivery
+    # (async_handle_discovery again, e.g. a peer's time_pattern resync)
+    # triggers its own async_write_ha_state() independent of the state
+    # topic -- it must not crash or clobber the "unavailable" status
+    # set by the state message.
+    hass = HomeAssistant()
+    manager, added = _make_manager(hass)
+
+    async def scenario():
+        await manager.async_handle_discovery(DISCOVERY_TOPIC, dict(EXAMPLE_PAYLOAD))
+        await mqtt.async_fire_mqtt_message(
+            hass, "share/other_bridge/sensor/garage_humidity", "unavailable"
+        )
+        # Redelivery of the same discovery payload (existing unique_id).
+        await manager.async_handle_discovery(DISCOVERY_TOPIC, dict(EXAMPLE_PAYLOAD))
+
+    _run(scenario())
+
+    entity = added[0]
+    assert entity.native_value is None
+    assert entity.available is False
+    assert hass.states.get(entity.entity_id).state == "unavailable"
+
+
 def test_redelivery_of_same_unique_id_updates_in_place_not_duplicated():
     hass = HomeAssistant()
     manager, added = _make_manager(hass)

@@ -323,7 +323,7 @@ present and unfixed, per §5a — this phase doesn't touch them.
   (`hacs.json`, versioning)~~ **Done**: config-flow/options/service strings
   are all in `strings.json`/`translations/en.json`; `hacs.json` and
   `manifest.json` are in place; the integration has shipped 8 versions
-  (`0.1.0` through `0.1.8`) through real releases.
+  (`0.1.0` through `0.1.10`) through real releases.
 - ~~Rename to Saulach Bridge~~ **Done**: both the integration (`DOMAIN`,
   package folder, class names, user-facing strings) and later the GitHub
   repository itself were renamed from Grapevine to Saulach/Saulach Bridge.
@@ -406,6 +406,37 @@ present and unfixed, per §5a — this phase doesn't touch them.
   winning and permanently hid the real version. `BridgedSensorEntity` no
   longer sets `sw_version` at all -- see `PROTOCOL.md` §9's new
   amendment.
+- ~~Bridge crashes writing state when a remote entity reports
+  "unavailable"~~ **Done** (issue #27): a bridged entity's own source going
+  unavailable means the raw MQTT state payload is the literal string
+  `"unavailable"` (or `"unknown"`) -- writing that straight into
+  `native_value` crashed HA core's numeric coercion for any sensor with a
+  numeric `device_class`, since a non-`None` string value is always
+  assumed to be a real number. `BridgedSensorEntity.set_native_value` now
+  translates both sentinels into `native_value = None` plus the correct
+  `available` flag before writing state, matching how HA itself
+  distinguishes "no value" from "not available". See `PROTOCOL.md` §4's
+  new amendment. Caught in production, not by the test suite -- same
+  class of gap as Decision 9: the fake harness's `SensorEntity` stub
+  didn't model `available`/numeric-coercion at all until this fix added
+  it specifically to make the regression testable.
+- ~~Stale retained state values replayed to fresh subscribers, corrupting
+  delta/accumulator consumers~~ **Done** (issue #29): state-topic publishes
+  were retained, same as discovery -- meaning a receiver reconnecting to
+  the broker, or restarting, got the last published value replayed
+  verbatim, indistinguishable from a live publish. Harmless for a plain
+  last-value display (the only thing this protocol's own receivers ever
+  did with it), but corrupts a consumer that treats incoming state as a
+  delta or feeds it into an accumulator. `publish_own_entity` now
+  publishes state with `retain=False`; the discovery topic is untouched.
+  Since a broker never clears a retained message just because a later
+  publish on the same topic isn't retained, a new
+  `LegacyDiscoveryAdapter.async_clear_retained_state` also runs on every
+  startup, before the scheduler's own startup republish, to clear out
+  whatever a pre-fix version of this integration already left retained.
+  See `PROTOCOL.md` §4's new amendment for why this is a wire-behavior
+  change that still doesn't need coordinating with the other two bridge
+  instances.
 - **Under investigation:** a user's own old bridge identity (from before
   the Saulach rename) reappearing locally even after `saulach.
   depublish_bridge` was run against it from a peer's instance. Two

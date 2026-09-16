@@ -76,6 +76,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # entry after a change).
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
 
+    # Issue #29 migration cleanup: clear any stale retained state-topic
+    # value a pre-fix version of this integration left behind (state
+    # publishes are no longer retained -- see legacy_discovery.py's
+    # publish_own_entity). Runs before scheduler.async_setup()'s startup
+    # full-republish so cleanup always precedes the fresh, non-retained
+    # values that follow it.
+    for entity_id in entry.data.get(CONF_ENTITIES, []):
+        await adapter.async_clear_retained_state(entity_id)
+
     # Must happen before scheduler.async_setup() starts the federation MQTT
     # subscription below -- the sensor platform registers the
     # async_add_entities callback RemoteEntityManager needs before it can
