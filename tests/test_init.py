@@ -100,6 +100,36 @@ def test_setup_entry_reads_manifest_version_off_the_event_loop(monkeypatch):
     assert saulach.integration_version in calls
 
 
+def test_setup_entry_clears_stale_retained_state_for_every_bridged_entity():
+    # issue #29 migration cleanup: a pre-fix version of this integration
+    # left retained values on state topics; setup must clear them (empty
+    # retained payload) before the scheduler's own startup republish
+    # publishes fresh, non-retained values.
+    hass = HomeAssistant()
+    entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a", "sensor.b"])
+    hass.states.async_set("sensor.a", "1")
+    hass.states.async_set("sensor.b", "2")
+
+    async def scenario():
+        await saulach.async_setup_entry(hass, entry)
+        # The startup full-republish runs as jittered background tasks
+        # (scheduler.py), not inline within async_setup_entry -- drain
+        # them so their publishes land before we inspect the log.
+        pending = list(entry.runtime_data.scheduler._tasks)
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    _run(scenario())
+
+    published = mqtt._state(hass).published
+    clear_index_a = published.index(("share/jakob/sensor/a", "", True))
+    clear_index_b = published.index(("share/jakob/sensor/b", "", True))
+    republish_index_a = published.index(("share/jakob/sensor/a", "1", False))
+    republish_index_b = published.index(("share/jakob/sensor/b", "2", False))
+    assert clear_index_a < republish_index_a
+    assert clear_index_b < republish_index_b
+
+
 def test_setup_entry_registers_service_once():
     hass = HomeAssistant()
     entry = _make_entry("entry1", "Bridge Jakob", ["sensor.a"])

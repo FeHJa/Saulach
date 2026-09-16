@@ -420,6 +420,23 @@ present and unfixed, per §5a — this phase doesn't touch them.
   class of gap as Decision 9: the fake harness's `SensorEntity` stub
   didn't model `available`/numeric-coercion at all until this fix added
   it specifically to make the regression testable.
+- ~~Stale retained state values replayed to fresh subscribers, corrupting
+  delta/accumulator consumers~~ **Done** (issue #29): state-topic publishes
+  were retained, same as discovery -- meaning a receiver reconnecting to
+  the broker, or restarting, got the last published value replayed
+  verbatim, indistinguishable from a live publish. Harmless for a plain
+  last-value display (the only thing this protocol's own receivers ever
+  did with it), but corrupts a consumer that treats incoming state as a
+  delta or feeds it into an accumulator. `publish_own_entity` now
+  publishes state with `retain=False`; the discovery topic is untouched.
+  Since a broker never clears a retained message just because a later
+  publish on the same topic isn't retained, a new
+  `LegacyDiscoveryAdapter.async_clear_retained_state` also runs on every
+  startup, before the scheduler's own startup republish, to clear out
+  whatever a pre-fix version of this integration already left retained.
+  See `PROTOCOL.md` §4's new amendment for why this is a wire-behavior
+  change that still doesn't need coordinating with the other two bridge
+  instances.
 - **Under investigation:** a user's own old bridge identity (from before
   the Saulach rename) reappearing locally even after `saulach.
   depublish_bridge` was run against it from a peer's instance. Two

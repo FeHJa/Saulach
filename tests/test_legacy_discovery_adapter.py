@@ -62,7 +62,7 @@ def _published(hass: HomeAssistant) -> list[tuple[str, str, bool]]:
 # --- publish_own_entity ---
 
 
-def test_publish_own_entity_publishes_discovery_and_state_retained():
+def test_publish_own_entity_publishes_discovery_retained_state_not_retained():
     hass = HomeAssistant()
     adapter = _make_adapter(hass, RecordingEntityManager())
     state = State("sensor.garage_temperature", "21.5", {"friendly_name": "Garage Temperature"})
@@ -92,7 +92,10 @@ def test_publish_own_entity_publishes_discovery_and_state_retained():
     state_topic, state_payload, state_retain = published[1]
     assert state_topic == "share/jakob/sensor/garage_temperature"
     assert state_payload == "21.5"  # raw string, no JSON wrapping (§4)
-    assert state_retain is True
+    # issue #29: state is no longer retained -- a retained value gets
+    # replayed to every fresh subscriber, indistinguishable from a live
+    # republish to a delta/accumulator consumer on the far side.
+    assert state_retain is False
 
 
 def test_publish_own_entity_drops_device_class_invalid_for_sensor_platform():
@@ -176,6 +179,22 @@ def test_depublish_publishes_empty_retained_payload_to_both_topics():
         ("share/homeassistant/sensor/garage_temperature/config", "", True),
         ("share/jakob/sensor/garage_temperature", "", True),
     ]
+
+
+# --- async_clear_retained_state (issue #29 migration cleanup) ---
+
+
+def test_clear_retained_state_publishes_empty_retained_payload_to_state_topic_only():
+    hass = HomeAssistant()
+    adapter = _make_adapter(hass, RecordingEntityManager())
+
+    _run(adapter.async_clear_retained_state("sensor.garage_temperature"))
+
+    published = _published(hass)
+    assert published == [("share/jakob/sensor/garage_temperature", "", True)]
+    # Discovery topic is untouched -- only the state topic was ever
+    # wrongly retained.
+    assert not any(topic.endswith("/config") for topic, _, _ in published)
 
 
 # --- async_publish_metadata (§9, issue #12) ---
