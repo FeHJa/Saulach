@@ -1,8 +1,8 @@
 """Tests for sensor.py's BridgeMetadataEntities holder (PROTOCOL.md §9) --
 used for remote bridges' diagnostic entities (test_remote_entity_manager.py
 covers that wiring) and, historically, this bridge's own diagnostic
-entities too, until that local surfacing was reverted per user feedback
-(kept out of the entity list; own metadata is wire-only, see PROTOCOL.md
+entities too, until that local surfacing was reverted (kept out of the
+entity list; own metadata is wire-only, see PROTOCOL.md
 §9's "Local surfacing" note). test_setup_entry_creates_no_own_bridge_
 diagnostic_entities below guards against that regressing.
 """

@@ -10,9 +10,10 @@ run against in tests, with test-only helpers to drive it
 (async_fire_time_changed, async_fire_mqtt_message, etc).
 
 Treat tests that pass against this stub as "our code's control flow does
-what we intended" — not as a substitute for running the real Phase 1
-acceptance tests (MIGRATION_PLAN.md) against actual Home Assistant core
-with pytest-homeassistant-custom-component before release.
+what we intended", not as proof it behaves correctly against real Home
+Assistant core — that's covered by production use across multiple
+federated instances instead of a pytest-homeassistant-custom-component
+layer, a deliberate choice (see MIGRATION_PLAN.md's "Engineering notes").
 
 Known, named gap (issue #13): this stub's `async_add_executor_job` just
 calls the target inline -- it does not model real HA's event-loop

@@ -1,623 +1,101 @@
-# Migration Plan: Blueprint → Saulach
+# Roadmap
 
 Source blueprint: https://github.com/FeHJa/HA-Blueprint-MQTT-Bridge/blob/main/mqtt_bridge.yaml
-Wire protocol contract: `PROTOCOL.md` (authoritative for Phase 1 behavior)
+Wire protocol: `PROTOCOL.md` (authoritative for on-the-wire behavior)
 
-## Goal
+## Status: Phase 1 baseline
 
-Replace the YAML automation blueprint with a native Home Assistant custom
-integration (`custom_components/saulach/`) that is functionally
-identical on the wire — any other instance still running the blueprint, or
-another migrated instance, must interoperate without changes on its end.
+Saulach Bridge is a behavior-preserving native port of the blueprint automation,
+running in production across multiple independent Home Assistant installs — including
+federation with at least one instance still on the unmodified blueprint. That
+cross-instance compatibility, without behavior changes required on the blueprint side,
+is Phase 1's acceptance test, and it's met.
 
-## Guiding principle
+"Phase 1" here includes what was originally scoped as a later Phase 3 piece — native
+entity creation for incoming federated entities, pulled forward early because
+MQTT-Discovery-forwarded entities had no cleanup path this integration controlled (see
+`PROTOCOL.md` §5a). Everything since has been a backward-compatible amendment on top of
+this baseline (tracked in `PROTOCOL.md`, one section per topic) or maintenance; none of
+it required coordinating a rollout with the other bridge instances.
 
-Phase 1 is a **behavior-preserving port**, not a redesign. Every detail in
-`PROTOCOL.md`, including both documented "known limitations," must be
-reproduced exactly. Anything that looks like an improvement (fixing the
-object_id collision, per-domain discovery components, availability/LWT)
-is explicitly deferred to a later phase so the two known limitations can be
-verified against real behavior before anyone decides whether to keep them.
-
-**Forward-compatibility seam (Phase 1 scope, not a wire change):** a target
-design for a future protocol generation has been identified — see
-`PROTOCOL.md` §8 — that replaces MQTT-Discovery-emulation with a
-manifest-publish-and-diff model and native entity creation. It is **not**
-being implemented now (it's gated on coordinating a rollout with the other
-two bridge instances). Phase 1 is built so reaching it later doesn't
-require a rewrite: every outgoing own-payload JSON gets a `protocol_version`
-field (§3, value `1` for Phase 1), and the protocol-specific
-publish/subscribe/parse logic lives behind a small internal
-`ProtocolAdapter` interface rather than being hardcoded into the MQTT I/O
-layer. See "Target architecture" and "Phase 3" below.
-
-## Target architecture
+## Architecture
 
 ```
 custom_components/saulach/
-├── __init__.py          # async_setup_entry / async_unload_entry, wires everything together
-├── manifest.json         # domain, dependencies: [mqtt], config_flow: true, iot_class
-├── const.py               # DOMAIN, CONF_* keys, defaults, sw_version, PROTOCOL_VERSION, the 8 regex patterns
-├── config_flow.py         # ConfigFlow + OptionsFlow — maps blueprint inputs (§1), sets unique_id
-├── scheduler.py            # entity-tracking, time_pattern trigger, on-demand republish, jitter
-├── discovery.py           # payload building (§3), device_class/unit resolution (§3 table)
-├── protocol.py             # ProtocolAdapter interface (seam for PROTOCOL.md §8's future manifest protocol)
-├── mqtt_io.py              # thin, protocol-agnostic MQTT client wrapper (subscribe/publish, retained)
-├── adapters/
-│   └── legacy_discovery.py # LegacyDiscoveryAdapter(ProtocolAdapter) — Phase 1's protocol (§2-5), the only adapter that exists right now
-├── remote_entity_manager.py # Phase 1b (§5a): create-or-update native entities from incoming federation messages, keyed by unique_id
-├── sensor.py                # Phase 1b: BridgedSensorEntity(SensorEntity); issue #12: BridgeMetadataEntities, per-remote-bridge diagnostic entities
-├── diagnostics.py           # issue #12: "Download Diagnostics" -- entity list + last published metadata
-├── version.py                # issue #12: reads this integration's own release version out of manifest.json
-└── strings.json / translations/en.json
-tests/
-├── test_config_flow.py
-├── test_discovery.py       # regex table, name fallback, device_class/unit precedence
-├── test_legacy_discovery_adapter.py  # topic construction, publish payload, loop prevention, protocol_version
-├── test_remote_entity_manager.py     # create-on-first-sight, update-in-place, state-topic subscription, unload cleanup
-├── test_scheduler.py       # time_pattern trigger, jitter bounds, on-demand republish
-└── test_integration.py     # entry setup/reload/unload against pytest-homeassistant-custom-component
+├── __init__.py                entry setup/unload, service registration, wiring
+├── config_flow.py             config + options flow (single "Configure" step)
+├── const.py                   domain, config keys, defaults, protocol constants
+├── discovery.py               discovery payload building, device_class/unit resolution
+├── protocol.py                ProtocolAdapter interface (seam for a future Phase 3 adapter)
+├── adapters/legacy_discovery.py   LegacyDiscoveryAdapter — the only adapter today (PROTOCOL.md §2-9)
+├── scheduler.py                publish timing: state-change, time_pattern, on-demand, jitter
+├── remote_entity_manager.py    create/update/remove native entities from incoming federation messages
+├── sensor.py                    BridgedSensorEntity, BridgeMetadataEntities
+├── diagnostics.py               "Download Diagnostics" support
+├── mqtt_io.py                    thin MQTT publish/subscribe wrapper
+└── version.py                    reads this integration's own version from manifest.json
 ```
 
-Rationale for the split: `discovery.py` is pure functions (entity/state in,
-payload dict out) so the device_class/unit regex table and name-fallback
-logic can be unit-tested without a running HA instance or MQTT broker.
-`mqtt_io.py` owns raw `homeassistant.components.mqtt` interaction
-(`async_subscribe`/`async_publish`) and knows nothing about discovery
-payloads or forwarding rules — it's the layer any future adapter reuses
-unchanged. `protocol.py` defines the `ProtocolAdapter` interface
-(`publish_own_entities()`, `handle_incoming_message(topic, payload)`,
-`topics_to_subscribe()`); `adapters/legacy_discovery.py` is Phase 1's (and
-today, the only) implementation — it owns everything protocol-specific:
-building discovery/state payloads via `discovery.py`, the loop guard (§5),
-and stamping `protocol_version` on outgoing payloads. As of Phase 1b
-(§5a), it no longer forwards incoming messages anywhere itself — it hands
-the parsed payload to `remote_entity_manager.py`, which creates or updates
-a native `sensor.py` entity keyed by the payload's `unique_id` and owns
-that entity's MQTT state-topic subscription directly (not via entity
-lifecycle hooks, so entity creation and its state feed are wired up
-atomically). `scheduler.py` drives timing (the `time_pattern` trigger, the on-demand
-republish service, jitter) by calling the active adapter's
-`publish_own_entities()` — it never talks to MQTT or builds a payload
-directly, so a future manifest-based adapter slots in without touching
-`scheduler.py` or `__init__.py`'s wiring. Phase 1 has exactly one adapter
-registered; the interface exists now so a second one is additive later,
-not a rewrite.
+`discovery.py` and `mqtt_io.py` are pure/low-level building blocks, unit-tested in
+isolation from Home Assistant. `ProtocolAdapter` exists so a future manifest-based
+protocol generation (Phase 3, see `PROTOCOL.md` §8) is an additive second adapter
+rather than a rewrite of `scheduler.py` or `__init__.py`'s wiring — only one adapter
+exists today. Runtime state lives on `entry.runtime_data`, not `hass.data[DOMAIN]`; the
+exception is a couple of small entry-keyed registries `__init__.py` uses to dispatch
+domain-global services to the config entry they were called for.
 
-**Naming note:** this module is deliberately *not* called `coordinator.py`
-and does not subclass HA's `DataUpdateCoordinator` — Phase 1 has no
-"pull data periodically into entities" use case that pattern is for, and
-naming it `coordinator.py` would invite someone to bolt that base class on
-incorrectly later. Wired-up runtime objects (the MQTT bridge instance, the
-scheduler, unsub callbacks) live on `entry.runtime_data`
-(the standard 2026.x-core pattern), not an ad-hoc `hass.data[DOMAIN]` dict.
+## Open items
 
-**Lifecycle/cleanup (must be explicit in `__init__.py`):** every
-subscription and background trigger registered during `async_setup_entry`
-must be unregistered via `entry.async_on_unload`, specifically: the
-federation `async_subscribe` unsub callback, the `time_pattern` trigger's
-cancel callback, and any in-flight jittered publish tasks. This matters
-concretely for Phase 2's options-flow reload of `time_pattern` — without
-it, a reload leaks the old MQTT subscription and every future incoming
-discovery message gets forwarded twice.
+- **Multi-entry support.** Not implemented — Phase 1 assumes a single config entry.
+  Services and internal registries are already keyed per entry rather than treated as
+  global, so adding this later shouldn't require rework. Two entries sharing a
+  `shared_discovery_prefix` would each independently process every retained federation
+  message — wasteful but not incorrect.
+- **Self-loop reappearance, under investigation.** A user's own pre-rename bridge
+  identity has been seen reappearing locally even after depublishing it from a peer's
+  instance. Not yet root-caused: either a peer's depublish only cleared the topics *it*
+  had discovered (leaving others this instance still holds retained), or the loop
+  guard's `bridge_id`/`unique_id` check no longer matches this instance's *current*
+  identity after a rename — which would be a real bug in the loop guard, not just a
+  depublish gap. Needs a reproduction that confirms which before it can be scoped.
 
-**MQTT readiness:** `manifest.json` must declare `"dependencies": ["mqtt"]`,
-and setup must wait for the MQTT client to be connected (e.g.
-`mqtt.async_wait_for_mqtt_client`) before the first publish/subscribe —
-otherwise a publish attempted during HA startup, before the broker
-connection is up, is silently lost.
+## Phase 3 — manifest protocol (not started)
 
-## Config entry mapping (§1)
+Full design in `PROTOCOL.md` §8. Replaces MQTT-Discovery-emulation with each bridge
+publishing its own manifest, and other instances explicitly opting into the peers they
+follow — removing the object_id/domain collision and hardcoded-component known
+limitations along the way. **Gated on coordinating a rollout with the other bridge
+instances; do not start building it unprompted.** The `protocol_version` field every
+Phase 1 payload already carries exists to make that rollout gradual and per-partner
+instead of a synchronized cutover.
 
-| Blueprint input | Config entry field | Notes |
-|---|---|---|
-| `entities` | `data[CONF_ENTITIES]` | list of entity_ids, any domain |
-| `shared_discovery_prefix` | `data[CONF_SHARED_DISCOVERY_PREFIX]` | default `share/homeassistant/` |
-| `sensor_value_prefix` | `data[CONF_SENSOR_VALUE_PREFIX]` | default `share/jakob/` |
-| `time_pattern` | `options[CONF_TIME_PATTERN_MINUTES]` | default 1; options flow so it's editable without reauth |
-| `bridge_name` | `data[CONF_BRIDGE_NAME]` | slugified once at setup into `bridge_id`, stored alongside |
+## Engineering notes
 
-`entities` and prefixes go in `data` (identity of the bridge instance);
-`time_pattern` goes in `options` (safely reconfigurable, triggers an entry
-update listener that resets the interval timer). Config flow validates
-`bridge_name` slugifies to a non-empty string and `entities` is non-empty,
-and sets `config_entry.unique_id = slug_bridge_name` — this both blocks
-accidentally creating two entries with the same bridge identity and gives
-Phase 2 multi-entry support a cheap collision guard when
-`shared_discovery_prefix` overlaps between entries.
+Non-obvious constraints worth knowing before touching this codebase:
 
-**`local_discovery_prefix` was dropped as of Phase 1b** (see below) — it
-existed only to support forwarding incoming federation messages into HA's
-local MQTT Discovery root, and that forwarding no longer happens (§5a).
-`PROTOCOL.md` §1 keeps it listed as a historical note about what the
-*blueprint* does; it's not part of this integration's config schema.
+- **Blocking I/O never runs directly on the event loop.** `version.py`'s manifest.json
+  read is synchronous file I/O; it's fetched once via `hass.async_add_executor_job` in
+  `async_setup_entry` and threaded through `SaulachRuntimeData`, not re-read by each
+  consumer. HA's blocking-call guard breaks entry setup/reload otherwise, and the fake
+  test harness doesn't model that detection — this class of bug has to be caught by
+  review, not by `pytest`.
+- **`entry.async_on_unload` callbacks must return `None`.** A callback that returns a
+  truthy, non-awaitable value (e.g. `dict.pop()`'s return value) makes real HA try to
+  schedule it as a task and crash on unload. The fake harness's `ConfigEntry.async_unload()`
+  does model this, so a new callback making the same mistake fails a test instead of
+  only showing up in a user's log.
+- **Testing strategy: the fake harness plus production use, not CI or a real-HA test
+  layer.** `pytest-homeassistant-custom-component` was considered and declined — see
+  `requirements_test.txt` for why. Production use across multiple federated instances
+  has reliably surfaced the same class of bug that layer would have caught (blocking
+  I/O, unload-callback crashes) — later than CI would have, but cheap to fix once
+  found. This is the accepted long-term strategy, not an interim state.
 
-**Resolved (issue #7):** the split above still applies to *where fields are
-stored* (`entities`/prefixes/`bridge_name` in `data`, `time_pattern` in
-`options`), but not to *how they're edited*. The original plan put the
-`data` fields behind a separate "Reconfigure" flow, following the
-conventional HA identity-vs-safely-reconfigurable split — in practice that
-second entry point wasn't discoverable (users only ever found the gear-icon
-"Configure" button and concluded entities/prefixes/bridge_name couldn't be
-changed at all). `SaulachOptionsFlow` was widened to edit every field —
-`data` and `options` alike — in one single "Configure" step, updating both
-via one `hass.config_entries.async_update_entry(...)` call. There is no
-longer a separate `async_step_reconfigure`.
+## History
 
-## Phase breakdown
-
-### Phase 1 — Protocol-faithful core (this migration's primary deliverable)
-
-1. Scaffold: `manifest.json`, `const.py`, minimal `config_flow.py` (single
-   step form for the 6 inputs above), `__init__.py` with
-   `async_setup_entry`/`async_unload_entry`.
-2. `discovery.py`: build the discovery payload (§3) exactly — field
-   presence/omission rules, the 8-pattern regex table ported **verbatim**,
-   friendly_name → title-cased object_id fallback, plus the new
-   `protocol_version: PROTOCOL_VERSION` field (const, value `1`) per
-   `PROTOCOL.md` §3/§8.
-3. `protocol.py` + `adapters/legacy_discovery.py` (the seam — see
-   "Target architecture" above), using `mqtt_io.py` for all actual broker
-   I/O:
-   - Own publish path: discovery → `{shared_discovery_prefix}sensor/{object_id}/config`,
-     state → `{sensor_value_prefix}sensor/{object_id}`, both retained (§2, §4).
-   - Federation subscribe: `{shared_discovery_prefix}+/+/config` using the
-     *configured* prefix (not the blueprint's hardcoded literal — §5).
-   - Loop guard ported exactly: skip on `bridge_id` match or `unique_id`
-     prefix match (`::` or `.` separator) (§5).
-   - What happens to a message that passes the loop guard: originally,
-     verbatim byte forwarding to `{local_discovery_prefix}/{component}/{object_id}/config`
-     (§5 as written). **Superseded by Phase 1b (§5a)** — see below — before
-     this integration was ever pointed at a real broker, so Phase 1 as
-     actually built creates a native entity instead. §5's forwarding
-     behavior is preserved here only as the historical baseline Phase 1b
-     amended.
-4. `scheduler.py`:
-   - State-change listener on bridged entities → publish discovery+state
-     for that one entity, using `trigger`/event `to_state.state` directly
-     (§4), not a fresh `states()` read.
-   - `time_pattern` trigger → full republish loop over all entities. Use
-     a clock-aligned trigger (`async_track_time_change`/the same
-     primitive HA's own `time_pattern` automation trigger is built on),
-     **not** `async_track_time_interval` anchored to setup time — the §6
-     jitter rationale ("three instances firing on the same minute mark")
-     only holds if all instances actually fire on the same wall-clock
-     minute, which a setup-time-anchored interval does not guarantee.
-   - On-demand republish: a domain service call,
-     `saulach.republish`, targeting a config entry (via a
-     `config_entry_id`/device selector in `services.yaml`), doing the
-     same full republish loop as the time_pattern trigger. This is the
-     Phase 1 replacement for the blueprint's `force_republish_sensors`
-     event. A `button` entity is deferred to Phase 2 but will be a thin
-     wrapper that calls this same service. Services are registered once
-     per domain, not per entry, so the handler must dispatch on the
-     targeted entry via an entry-keyed registry (small dict of
-     `entry_id -> handler`), not a singleton — this keeps multi-entry
-     (Phase 2) from requiring a signature change later.
-   - Jitter: random 0–9s delay before each discovery/state publish,
-     applied per-publish via `hass.async_create_background_task` (tracked
-     and auto-cancelled on unload) rather than raw `asyncio.create_task`,
-     so a full republish burst can't leak untracked tasks past entry
-     unload (equivalent in spirit to the blueprint's `mode: parallel, max: 50`).
-5. Unit tests for `discovery.py` (regex table, fallbacks, `protocol_version`
-   presence) and `adapters/legacy_discovery.py` (topic strings, publish
-   payload shape, loop guard) — these encode `PROTOCOL.md` as executable
-   spec. In addition, integration-level tests
-   using `pytest-homeassistant-custom-component` (`hass` + `mqtt_mock`
-   fixtures) covering config-entry setup/reload/unload: subscription is
-   created on setup, torn down on unload/reload (no duplicate forwarding
-   after a reload), and the `time_pattern` trigger is cancelled on unload.
-   Pure-function tests alone won't catch this class of plumbing bug.
-6. Manual interop test: run this integration alongside a real instance of
-   the blueprint (or a second migrated instance) against a shared broker,
-   confirm the blueprint instance still sees this bridge's own entities via
-   MQTT Discovery exactly as before, and that no message-processing loop
-   occurs (loop guard still applies regardless of what a passing message
-   turns into locally — see Phase 1b/§5a).
-
-**Acceptance criteria:** outbound topic layout, payload shape (including
-the new `protocol_version: 1` field), regex table, and loop prevention
-match `PROTOCOL.md` exactly; both documented known limitations are present
-and unfixed; a blueprint instance and this integration interoperate over
-the same broker without behavior changes on the blueprint side; the
-`ProtocolAdapter` interface exists and `LegacyDiscoveryAdapter` is its only
-implementation — no manifest-based adapter is built or wired up. (Inbound
-message handling is covered by Phase 1b's acceptance criteria below, since
-it landed as an amendment before real-broker testing.)
-
-**Status: met, confirmed in real-world use.** Step 6's manual interop test
-happened for real, repeatedly, over weeks: multiple independent Home
-Assistant installs federate over a shared broker today, at least one still
-running the unmodified blueprint automation, with no behavior changes
-required on its side. This surfaced real bugs the test suite didn't catch
-(see Decisions 7-8 and Decision 9) — production usage ended up doing
-double duty as both the acceptance test and the bug-finding process
-originally planned as separate steps, which is the accepted testing
-strategy going forward (Decision 9).
-
-### Phase 1b — Native entity creation for federated entities (pulled forward from Phase 3)
-
-Full rationale in `PROTOCOL.md` §5a. Landed before any real-broker testing,
-in response to a concrete concern: MQTT-Discovery-forwarded entities are
-owned and cleaned up by Home Assistant's own `mqtt` integration, not by
-this one, so there was no way for this integration to guarantee they get
-removed when you remove the bridge — a real "flooded with orphaned
-entities" risk. Unlike the full Phase 3 redesign, this piece only changes
-what a *receiving* instance does with an already-loop-guarded incoming
-message — nothing about it is observable by the bridge that sent it, so
-**it does not require coordinating a rollout with the other two bridge
-instances.** Safe to do unilaterally, on this instance alone, at any time.
-
-1. `sensor.py`: new entity platform, `BridgedSensorEntity(SensorEntity)`.
-   `_attr_should_poll = False`; attributes (`name`, `device_class`,
-   `unit_of_measurement`, `device_info`) set from the incoming discovery
-   payload's fields directly — no regex re-derivation, unlike our own
-   outbound payload construction, since the incoming payload already
-   carries resolved values. `device_info.identifiers` maps the payload's
-   `device.identifiers` (bare bridge-id strings) into HA's
-   `{(DOMAIN, ident)}` tuple form, namespaced under this integration's own
-   domain.
-2. `remote_entity_manager.py`: `RemoteEntityManager`, keyed by the
-   payload's `unique_id`:
-   - First sighting of a `unique_id` → construct a `BridgedSensorEntity`,
-     hand it to the platform's `async_add_entities` callback, and
-     subscribe to the payload's `state_topic` via `mqtt_io.py` — owned by
-     the manager directly (not via `async_added_to_hass`/
-     `async_will_remove_from_hass` entity lifecycle hooks), so entity
-     creation and its state feed are wired up atomically and don't depend
-     on entity-platform timing.
-   - Repeat sighting of a known `unique_id` (redelivery on time_pattern
-     resync, or the origin bridge changed the entity's name/device_class)
-     → update the existing entity's attributes in place and
-     `async_write_ha_state()`, not a duplicate entity.
-   - Unload (`entry.async_on_unload`): unsubscribe every tracked
-     state-topic subscription. Entity removal itself is handled by HA's
-     standard platform-unload machinery once `__init__.py` calls
-     `async_unload_platforms` — this is the mechanism that actually closes
-     the "flooded with orphaned entities" gap: removing the config entry
-     removes these entities automatically, no separate depublish code
-     needed for the receiving side.
-3. `adapters/legacy_discovery.py`: `handle_incoming_message` drops the
-   forward-to-`local_discovery_prefix` step entirely and instead calls
-   `remote_entity_manager.async_handle_discovery(payload_data)` after the
-   (unchanged) loop guard. `local_discovery_prefix` is removed from
-   `const.py`/`config_flow.py` — it had no remaining purpose. Topic-shape
-   validation (`parse_federation_topic`) is kept as a defensive check, but
-   its `component`/`object_id` return values are no longer needed
-   downstream — the manager keys everything off the payload's own
-   `unique_id`.
-4. `__init__.py`: `PLATFORMS = ["sensor"]`; forward/unload platform setups
-   around the existing scheduler wiring; `entry.runtime_data` becomes a
-   small dataclass holding both the `BridgeScheduler` and the
-   `RemoteEntityManager` (previously just the scheduler alone). Platform
-   setup (which registers the `async_add_entities` callback) must
-   complete *before* `scheduler.async_setup()` starts the federation MQTT
-   subscription, or an early incoming message could arrive before
-   anything can materialize it — ordering, not a queue, is what
-   prevents this race.
-
-**Acceptance criteria:** a federation message that passes the loop guard
-results in exactly one native entity per `unique_id`, correctly attributed
-(name/device_class/unit/device), whose state updates when its `state_topic`
-receives a new retained message; redelivery of the same `unique_id`
-updates in place rather than duplicating; removing the config entry
-removes the entities; nothing is written to `local_discovery_prefix`
-(the field no longer exists in config). Both §2 known limitations remain
-present and unfixed, per §5a — this phase doesn't touch them.
-
-### Phase 2 — Integration polish
-
-- ~~Options flow for `time_pattern`~~ **Done** (issue #7): `SaulachOptionsFlow`
-  is the single "Configure" step covering every editable field —
-  `time_pattern_minutes` plus the `data` fields (entities/prefixes/
-  bridge_name) — wired to an `entry.add_update_listener` that actually
-  reloads the entry on any change — previously nothing did. An earlier
-  version of this split entities/prefixes/bridge_name into a separate
-  `async_step_reconfigure` flow, but that second entry point wasn't
-  discoverable in practice (issue #7's reopening) and was folded back into
-  `SaulachOptionsFlow`. Entities dropped from the list, or the whole
-  entry on removal, are now depublished (empty retained payload) rather
-  than left as stale entities on other instances; see `PROTOCOL.md`
-  §5b/`async_depublish_entity`.
-- ~~`strings.json`/translations, `manifest.json` metadata for HACS
-  (`hacs.json`, versioning)~~ **Done**: config-flow/options/service strings
-  are all in `strings.json`/`translations/en.json`; `hacs.json` and
-  `manifest.json` are in place; the integration has shipped 8 versions
-  (`0.1.0` through `0.1.10`) through real releases.
-- ~~Rename to Saulach Bridge~~ **Done**: both the integration (`DOMAIN`,
-  package folder, class names, user-facing strings) and later the GitHub
-  repository itself were renamed from Grapevine to Saulach/Saulach Bridge.
-  Not originally planned in this document — driven by an external
-  branding decision partway through Phase 2. Required every existing
-  install's config entry to be recreated (HA has no migration path across
-  a domain change) — the recommended order was to remove the old entry
-  first (while the old domain's code could still run its depublish-on-
-  removal path), *then* upgrade, *then* recreate under the new domain
-  with the same `bridge_name` for wire continuity. See the note below
-  about a still-open loose end from installs that upgraded in the other
-  order.
-- ~~Diagnostics platform for support requests~~ **Done** (issue #12): closed
-  together with a new metadata message (`PROTOCOL.md` §9) -- each bridge
-  publishes its own protocol/integration/HA version, bridged entity count,
-  and a last-heartbeat timestamp to a dedicated topic every `time_pattern`
-  tick, plus the full payload through `diagnostics.py` for "Download
-  Diagnostics". An earlier version of this also surfaced this bridge's
-  own metadata locally as a device with three `entity_category:
-  diagnostic` entities, same as remote bridges get (`sensor.py`'s
-  `BridgeMetadataEntities`) -- reverted per user feedback (added a
-  sensor-less device cluttering the device list, see §9's "Local
-  surfacing (own bridge): reverted" note). Remote bridges still get their
-  device with those three entities; only the own-bridge one was removed.
-- ~~Clean up devices orphaned by removing local surfacing~~ **Done**: the
-  own-bridge device change above left existing installs with a stranded
-  device (its three diagnostic entities no longer recreated, but still
-  sitting in the registry) that HA won't offer a UI way to delete while
-  the config entry is loaded. `__init__.py`'s `_async_cleanup_orphaned_devices`
-  runs on every `async_setup_entry` and removes any device owned by this
-  entry with zero entities left in the entity registry. Deliberately
-  registry-only and startup-only, not an "ignore this bridge" or
-  forget/unforget mechanism -- a device that still has entities is by
-  definition in use and is never touched, whether or not the remote
-  bridge is currently publishing, so this can't delete anything active
-  and can't affect entity history (which is already gone once the
-  entities themselves are gone).
-- ~~`saulach.depublish_bridge` service~~ **Done** (issue #12 follow-up):
-  the startup cleanup above only catches a device once it has zero
-  entities, which never happens for a peer whose empty-retained removal
-  signal (§5b) was never actually delivered to us live -- MQTT retains
-  forever, so a merely-cleared-on-the-broker or never-cleared topic just
-  gets redelivered on our next restart, looking exactly like a live
-  bridge. There's no reliable local signal to tell a dead peer from a
-  quiet one, so this isn't automatic: the service takes a bridge device
-  the user names explicitly (device selector in `services.yaml`,
-  Developer Tools → Actions only -- no button entity), publishes an
-  empty retained payload to each entity's discovery topic (durably
-  clearing the broker, unlike a plain local entity delete) and tears it
-  down locally right away rather than waiting on its own publish looping
-  back. See `PROTOCOL.md` §5c. `RemoteEntityManager`/`__init__.py`
-  resolve the device back to a `RemoteEntityManager` via a small
-  `entry_id -> manager` dict in `hass.data[DOMAIN]`, the same pattern
-  `republish_handlers` already uses, rather than
-  `hass.config_entries.async_get_entry` -- keeps the lookup
-  self-contained the same way the existing republish dispatch is.
-  **Follow-up fix:** the first cut sourced entities from
-  `RemoteEntityManager`'s in-memory bookkeeping (populated only by
-  discovery messages actually seen this session) -- a no-op for exactly
-  the bridges this service exists for, since a long-dead peer is by
-  definition not delivering anything this session; its entities showed
-  "Unavailable" and the service silently did nothing, no error either.
-  `async_depublish_bridge` now reads the *entity registry* for the
-  target device instead (persists across restarts regardless of
-  session), reconstructs each entity's discovery topic from its
-  `unique_id`, and either routes through the normal removal path (if
-  `RemoteEntityManager` does have it live) or removes the stale registry
-  entry directly (nothing live to call `.async_remove()` on). Also now
-  removes the device itself once its entities are gone, rather than
-  waiting for the next startup's #18 cleanup pass to catch it.
-- ~~Remote bridge device showing "Firmware 1.0.3" instead of its real
-  version~~ **Done**: `BridgedSensorEntity` was setting the remote device's
-  `sw_version` from the incoming discovery payload's `device.sw_version`
-  — always the wire protocol's fixed legacy constant (§3's `SW_VERSION`),
-  not a peer's actual release. Home Assistant's device registry keeps
-  whichever entity most recently supplied `sw_version` for a device, and
-  since ordinary discovery fires on every state change (far more often
-  than `BridgeMetadataEntities`' once-per-`time_pattern`-tick updates
-  with the real `integration_version`), the meaningless `"1.0.3"` kept
-  winning and permanently hid the real version. `BridgedSensorEntity` no
-  longer sets `sw_version` at all -- see `PROTOCOL.md` §9's new
-  amendment.
-- ~~Bridge crashes writing state when a remote entity reports
-  "unavailable"~~ **Done** (issue #27): a bridged entity's own source going
-  unavailable means the raw MQTT state payload is the literal string
-  `"unavailable"` (or `"unknown"`) -- writing that straight into
-  `native_value` crashed HA core's numeric coercion for any sensor with a
-  numeric `device_class`, since a non-`None` string value is always
-  assumed to be a real number. `BridgedSensorEntity.set_native_value` now
-  translates both sentinels into `native_value = None` plus the correct
-  `available` flag before writing state, matching how HA itself
-  distinguishes "no value" from "not available". See `PROTOCOL.md` §4's
-  new amendment. Caught in production, not by the test suite -- same
-  class of gap as Decision 9: the fake harness's `SensorEntity` stub
-  didn't model `available`/numeric-coercion at all until this fix added
-  it specifically to make the regression testable.
-- ~~Stale retained state values replayed to fresh subscribers, corrupting
-  delta/accumulator consumers~~ **Done** (issue #29): state-topic publishes
-  were retained, same as discovery -- meaning a receiver reconnecting to
-  the broker, or restarting, got the last published value replayed
-  verbatim, indistinguishable from a live publish. Harmless for a plain
-  last-value display (the only thing this protocol's own receivers ever
-  did with it), but corrupts a consumer that treats incoming state as a
-  delta or feeds it into an accumulator. `publish_own_entity` now
-  publishes state with `retain=False`; the discovery topic is untouched.
-  Since a broker never clears a retained message just because a later
-  publish on the same topic isn't retained, a new
-  `LegacyDiscoveryAdapter.async_clear_retained_state` also runs on every
-  startup, before the scheduler's own startup republish, to clear out
-  whatever a pre-fix version of this integration already left retained.
-  See `PROTOCOL.md` §4's new amendment for why this is a wire-behavior
-  change that still doesn't need coordinating with the other two bridge
-  instances.
-- **Under investigation:** a user's own old bridge identity (from before
-  the Saulach rename) reappearing locally even after `saulach.
-  depublish_bridge` was run against it from a peer's instance. Two
-  candidate explanations, not yet distinguished: (a) the peer's
-  depublish only cleared the topics *it* had discovered, leaving others
-  this instance knows about still retained, or (b) a genuine self-loop —
-  this instance's own current publish no longer matches the loop guard's
-  expected `bridge_id`/`unique_id` prefix (e.g. because `bridge_name`
-  changed across the rename), so it treats its own messages as a foreign
-  peer's and keeps re-materializing/re-publishing them every
-  `time_pattern` tick regardless of how many times anyone depublishes.
-  If (b) is confirmed, that's a real bug needing a fix at the loop-guard
-  level, not just a depublish; needs the reporting user to check whether
-  the reappeared device's entities keep updating live before this can be
-  scoped further.
-- **Declined:** a CI pipeline, a real-`homeassistant`/`pytest-homeassistant-
-  custom-component` test layer, and a `button` entity wrapper for
-  `saulach.republish` were all considered and dropped — not needed. See
-  Decision 9 for the testing-strategy call specifically.
-- **Multi-entry support** (lower priority — not currently needed, but
-  worth designing for): allow multiple config entries so one HA install
-  can run several bridge instances (e.g. against different brokers or
-  with different `bridge_name`/prefixes). Phase 1 targets a single entry;
-  as long as `unique_id`/service registration in Phase 1 are keyed per
-  config entry rather than assumed global, this should not require
-  rework later. Note: two entries sharing the same `shared_discovery_prefix`
-  will each independently process every retained federation message
-  (wasteful, not incorrect) — acceptable for Phase 2, worth a mention in
-  docs/options-flow help text.
-
-### Phase 3 — Manifest-based protocol (named target, not started)
-
-Full design in `PROTOCOL.md` §8 — summarized here for the phase-plan view.
-**Gated on coordinating a rollout with the other two bridge instances; do
-not start implementation without that coordination happening first.**
-Narrower than originally scoped, now that Phase 1b exists: the *local
-materialization* half (native entities instead of MQTT Discovery) is
-already done. What's left here is entirely the *outbound* half plus the
-subscription model:
-
-- Replace MQTT-Discovery-emulation with each bridge publishing a retained
-  JSON manifest (`{bridge_id, object_id, domain, name, device_class, unit,
-  state_topic}` per entity) to `ha_bridge/{bridge_id}/manifest`.
-- Config flow gains a "follow list" — which peer bridges' manifests to
-  subscribe to (opt-in, not blanket-subscribe like today's shared prefix).
-- New adapter, `adapters/manifest.py` implementing `ProtocolAdapter`,
-  diffs a followed peer's manifest and feeds the *same*
-  `remote_entity_manager.py` Phase 1b already built — expect this to be
-  close to a drop-in reuse (a manifest entry maps to the same
-  create-or-update-by-unique_id shape `RemoteEntityManager` already
-  expects), not a second entity-creation mechanism. No loop-guard logic
-  needed — the whole §5/§5a message-processing-loop concern goes away for
-  bridges that have moved to this protocol, since there's no
-  echo-of-your-own-message case when you only ever read peers you
-  explicitly follow.
-- `protocol_version` (§3/§8) on incoming messages lets a bridge decide,
-  per followed peer, whether to speak legacy-discovery or manifest
-  protocol — this is what makes a gradual per-partner rollout possible
-  instead of a synchronized cutover.
-- As a side effect, resolves both §2 known limitations (object_id/domain
-  collision, hardcoded `sensor` component) for bridges that have migrated
-  — the manifest carries the real domain per entity, unlike the legacy
-  discovery payload's hardcoded `sensor` component.
-- Investigate blueprint commit history for why availability/LWT tracking
-  was removed (§7) before considering reintroducing it — the direct
-  entity-platform model (already in place since Phase 1b) makes
-  availability tracking straightforward to add if wanted (no more
-  piggybacking on MQTT Discovery's own `availability_topic` convention).
-
-## Decisions
-
-1. **On-demand full republish trigger**: `services.yaml` service call
-   `saulach.republish` in Phase 1. A Phase 2 `button` entity wrapper was
-   considered and declined — the service alone (Developer Tools → Actions)
-   is sufficient.
-2. **Minimum HA core version**: `2026.7`. `manifest.json`
-   `"homeassistant"` requirement pinned accordingly; target the
-   `mqtt` component's `async_subscribe`/`async_publish` API surface as of
-   that release.
-3. **Multiple config entries**: not needed for Phase 1 (single entry is
-   sufficient), but plausible later. Phase 1 must not hardcode
-   assumptions that only one entry exists (e.g. service registration and
-   any module-level state must be keyed per config entry). Full
-   multi-entry support (e.g. per-entry MQTT client considerations) is
-   tracked as a lower-priority Phase 2 item.
-4. **`protocol_version` field**: added to every outgoing own-payload JSON
-   starting in Phase 1 (value `1`), even though nothing reads it yet.
-   Cost is one constant and one dict key; the payoff is that Phase 3's
-   manifest protocol can be rolled out per-partner instead of requiring a
-   synchronized cutover across all three bridge instances. See
-   `PROTOCOL.md` §8.
-5. **`ProtocolAdapter` abstraction**: Phase 1's discovery/forwarding/loop-
-   guard logic is implemented as `LegacyDiscoveryAdapter`, behind a
-   `ProtocolAdapter` interface, rather than inlined into the MQTT I/O
-   layer. Only one adapter exists right now — this is purely a seam so a
-   future `adapters/manifest.py` (Phase 3, not started) is additive rather
-   than a rewrite of `scheduler.py`/`__init__.py`'s wiring. Do not build
-   the manifest adapter now; it's gated on cross-instance coordination.
-6. **Pull Phase 3's local entity-materialization forward as Phase 1b**:
-   done before any real-broker testing, in direct response to the risk
-   that MQTT-Discovery-forwarded entities have no cleanup path this
-   integration controls. Confirmed safe to do without partner
-   coordination, since it only changes what a *receiving* instance does
-   with an already-loop-guarded message — see `PROTOCOL.md` §5a. As a
-   consequence, `local_discovery_prefix` is removed from the config
-   schema entirely (dead field, nothing left to write there) rather than
-   kept around unused.
-7. **No blocking I/O directly in `async_setup_entry`/adapter constructors**
-   (learned the hard way, issue #13): `version.py`'s manifest.json read is
-   synchronous file I/O; calling it straight from `LegacyDiscoveryAdapter.
-   __init__`/`BridgeMetadataEntities.__init__` ran it on the event loop on
-   every setup, including every reload triggered by the Configure flow —
-   HA's blocking-call guard caught it and broke the entry until a full
-   delete+recreate. The fake HA test harness doesn't model this detection
-   at all, so the test suite passed the whole time. Fixed by fetching it
-   once via `hass.async_add_executor_job` in `async_setup_entry` and
-   threading the value through `SaulachRuntimeData` instead of letting
-   each consumer read the file itself. Any future blocking call (file I/O,
-   network, subprocess) must go through `hass.async_add_executor_job` the
-   same way — this class of bug is invisible to the test harness, so it
-   has to be caught by code review, not by `pytest`.
-8. **`entry.async_on_unload` callbacks must return `None`** (learned the
-   hard way, issue #13 continued): `lambda: handlers.pop(entry.entry_id,
-   None)` in `__init__.py` looked like a harmless cleanup callback, but
-   `dict.pop()` returns the *removed value* — here, the
-   `scheduler.async_republish_all` bound method that was stored at that
-   key. Real HA's on-unload processing treats a truthy callback return as
-   a job to schedule as a task, tries to wrap that bound method as a
-   coroutine, and crashes with "Failed to Unload" on every unload
-   (including every reload the Configure flow triggers). Fixed by wrapping
-   the cleanup in a named function that discards the pop's result. Unlike
-   decision 7, this one *is* now caught by the test harness — `ConfigEntry
-   .async_unload()`'s fake now mirrors this exact real-HA behavior
-   (raises if a callback returns something truthy and non-awaitable), so
-   any future on_unload callback making the same mistake fails a test
-   instead of only showing up in a user's log.
-9. **`pytest-homeassistant-custom-component`, and CI generally, declined —
-   production use is the accepted testing strategy.** Phase 1 step 5
-   originally planned a `pytest-homeassistant-custom-component` layer
-   beyond the pure-function/fake-harness suite specifically to catch
-   plumbing bugs (subscription lifecycle, blocking-call detection) the
-   fake harness can't model — it stayed a TODO in `requirements_test.txt`
-   through every release so far. In its place, real production use across
-   multiple federated instances found the same class of bug the real
-   framework was meant to catch (decisions 7 and 8 are both examples) —
-   later, in a user's log rather than in CI, but cheap to fix once found
-   (both were one-line fixes). Decided that trade is acceptable: no CI
-   pipeline, no real-`homeassistant` test dependency, no button-entity
-   Phase 2 filler — `pytest` against the fake harness plus production
-   usage is the testing strategy going forward, not an interim state.
-
-Phase 1 work can start directly from the file layout above, using
-`PROTOCOL.md` as the acceptance spec for each module.
-
-## Architecture review (pre-implementation gate)
-
-Before starting Phase 1 coding, this plan was reviewed by a dedicated
-software-architecture pass. Findings already folded into the sections
-above:
-
-- Renamed `coordinator.py` → `scheduler.py` to avoid implying HA's
-  `DataUpdateCoordinator` pattern, which doesn't fit this use case.
-- Runtime state lives on `entry.runtime_data`, not `hass.data[DOMAIN]`.
-- Explicit unload/reload cleanup requirement (subscriptions, trigger
-  cancellation, in-flight jittered tasks) called out in Phase 1 step 4.
-- `time_pattern` must be a clock-aligned trigger, not a setup-time-anchored
-  interval, or the §6 jitter rationale doesn't hold.
-- `config_entry.unique_id = slug_bridge_name` added to the config-flow
-  mapping section.
-- `manifest.json` MQTT dependency + wait-for-client requirement added.
-- Jittered publishes must use `hass.async_create_background_task`, not
-  raw `asyncio.create_task`, so they're cancelled on unload.
-- Service registration must dispatch per targeted config entry (small
-  entry-keyed registry), since HA services are domain-global — flagged in
-  Phase 1 step 4 to avoid a signature change when Phase 2 multi-entry
-  lands.
-- Testing strategy extended to include `pytest-homeassistant-custom-component`
-  integration tests for entry setup/reload/unload, not just pure-function
-  unit tests.
-- Two open tradeoffs flagged but deliberately left as-is for now: the
-  data/options split may need revisiting if `entities`/prefixes turn out
-  to need frequent edits (see Config entry mapping section), and
-  same-prefix multi-entry federation overlap is accepted as a documented
-  Phase 2 wrinkle rather than solved now.
+Originally shipped as "Grapevine"; renamed to Saulach Bridge (domain, package, and
+later the GitHub repository) partway through development, for branding reasons rather
+than a technical one. Home Assistant has no config-entry migration path across a domain
+rename, so every existing install's entry had to be recreated — remove the old entry
+first (so its depublish-on-removal path still ran under the old domain), upgrade, then
+recreate under the new domain with the same `bridge_name` for wire continuity.

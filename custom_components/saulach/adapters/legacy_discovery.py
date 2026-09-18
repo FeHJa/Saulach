@@ -4,8 +4,7 @@ Implements the MQTT-Discovery-emulation protocol reverse-engineered in
 PROTOCOL.md §2-§5: own-entity discovery/state publish, federation
 subscribe, and the loop-prevention guard. Incoming messages that pass the
 loop guard are handed to a RemoteEntityManager, which materializes them as
-native entities rather than forwarding them (§5a) — see
-MIGRATION_PLAN.md's Phase 1b for why.
+native entities rather than forwarding them — see PROTOCOL.md §5a for why.
 """
 
 from __future__ import annotations

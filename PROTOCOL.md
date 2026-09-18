@@ -1,11 +1,20 @@
-# Wire Protocol Contract (reverse-engineered from the blueprint)
+# Wire Protocol Contract
 
-Source: https://github.com/FeHJa/HA-Blueprint-MQTT-Bridge/blob/main/mqtt_bridge.yaml
+Source blueprint: https://github.com/FeHJa/HA-Blueprint-MQTT-Bridge/blob/main/mqtt_bridge.yaml
 
-This is the exact behavior Phase 1 of the integration must reproduce. Treat every detail
-here as intentional/required unless explicitly marked "known limitation."
+This is the MQTT wire protocol Saulach Bridge speaks, reverse-engineered from the
+original blueprint automation so that Saulach interoperates with instances still
+running the blueprint unmodified. Treat every detail here as required behavior unless
+marked a **known limitation** (kept deliberately, for compatibility) or an
+**amendment** (a later, backward-compatible addition — each one explains why it needed
+no coordination with the other bridge instances).
 
-## 1. Configuration inputs (blueprint inputs → become config_entry data/options)
+> `CLAUDE.md` in the repo root is a byte-identical copy of this file — AI coding
+> assistants load `CLAUDE.md` automatically as project context, so it has to exist
+> under that name too. Edit this file and copy it over `CLAUDE.md`; never edit
+> `CLAUDE.md` directly.
+
+## 1. Configuration inputs
 
 | Input | Default | Purpose |
 |---|---|---|
@@ -22,26 +31,23 @@ here as intentional/required unless explicitly marked "known limitation."
 ## 2. Topic layout
 
 - Own discovery config → `{shared_discovery_prefix}sensor/{object_id}/config` (retained)
-- Own state value → `{sensor_value_prefix}sensor/{object_id}` (retained)
+- Own state value → `{sensor_value_prefix}sensor/{object_id}`
 - Forwarded remote discovery → `{local_discovery_prefix}/{component}/{object_id}/config` (retained)
   — **this is the blueprint's behavior; this integration does not do this, see §5a**
 - `object_id` = `entity_id.split('.')[-1]` (domain stripped)
 - `component` / `object_id` for forwarding are parsed positionally from the incoming topic,
   at the position right after the shared prefix
 
-**Known limitation (do not fix in Phase 1):** `object_id` excludes the domain, so two
-entities in different domains sharing an object_id (e.g. `sensor.garage` and
-`binary_sensor.garage`) collide on the same topic — the retained message from whichever
-publishes last wins. This happens upstream, on the *origin* bridge's own publish path, so
-it isn't affected by §5a's change to how a *receiving* instance materializes incoming
-messages — a native entity built from a colliding payload is just as last-write-wins as a
-forwarded discovery message would have been.
+**Known limitation:** `object_id` excludes the domain, so two entities in different
+domains sharing an object_id (e.g. `sensor.garage` and `binary_sensor.garage`) collide
+on the same topic — the retained message from whichever publishes last wins. This
+happens upstream, on the *origin* bridge's own publish path, before a receiver ever
+sees it — §5a's native materialization doesn't change that.
 
-**Known limitation (do not fix in Phase 1):** the discovery *component* segment for own
-entities is hardcoded to `sensor` regardless of the source entity's actual domain. A
-bridged `binary_sensor` or `input_boolean` is published as a generic MQTT `sensor`, not as
-its native discovery type. Also unaffected by §5a: a receiving instance only ever sees
-`component: sensor` in what it gets, native-entity or not.
+**Known limitation:** the discovery *component* segment for own entities is hardcoded
+to `sensor` regardless of the source entity's actual domain. A bridged `binary_sensor`
+or `input_boolean` is published as a generic MQTT `sensor`, not its native discovery
+type. A receiving instance only ever sees `component: sensor`, native-entity or not.
 
 ## 3. Discovery payload (own entities → shared prefix)
 
@@ -62,15 +68,15 @@ its native discovery type. Also unaffected by §5a: a receiving instance only ev
 }
 ```
 
-`protocol_version` is a new field, not present in the original blueprint's
-payload. It is safe to add: other instances already tolerate the
-non-standard `bridge_id` key today (they ignore unknown JSON keys), so one
-more integer field does not break their forwarding or loop-prevention
-logic. See §8 for why it's there.
+`protocol_version` is not present in the original blueprint's payload, but is safe to
+add: other instances already tolerate the non-standard `bridge_id` key (unknown JSON
+keys are ignored), so one more integer field doesn't break forwarding or loop
+prevention. See §8 for why it's there.
 
 ### device_class / unit_of_measurement resolution order
 
-1. Use the source entity's actual `device_class` / `unit_of_measurement` attribute if present.
+1. Use the source entity's actual `device_class` / `unit_of_measurement` attribute, but
+   only if the source entity's real domain is `sensor` (see the amendment below).
 2. Else, regex-match the `object_id` suffix against these 8 known patterns (first match
    wins, case-insensitive, pattern shape is `(^|_)<word>(_|$)`):
 
@@ -89,301 +95,229 @@ logic. See §8 for why it's there.
 
 Port these regexes verbatim — do not rewrite or "simplify" them.
 
-**Amendment (issue #13):** step 1 only uses the source entity's actual `device_class` if
-the source entity's real domain is also `sensor`. Since the `component` segment is
-hardcoded to `sensor` regardless of the source entity's real domain (the known limitation
-just above), any other domain's `device_class` is *not* forwarded verbatim; step 1 is
-skipped for it and resolution falls through to step 2/3 as if the entity had no
-`device_class` at all. This is a domain check, not a device_class-name check, for two
-distinct failure modes seen in practice:
-- Some names (`light`, `motion`, ...) are only valid for `binary_sensor`, not `sensor` at
-  all — forwarding them unfiltered made a receiver's own `mqtt` integration reject the
-  entire discovery message outright (invalid enum value).
-- Some names (`moisture`, `battery`, `power`, ...) are valid `SensorDeviceClass` members
-  *and* valid `BinarySensorDeviceClass` members, with different value semantics — numeric
-  for `sensor`, boolean `on`/`off` for `binary_sensor`. A device_class-name check alone
-  lets these through since the name is legitimate; a `binary_sensor`'s `on`/`off` state
-  then crashes HA's own numeric coercion on the receiving side. Only a domain check catches
-  this, since there's no device_class name that's safe to forward from a non-`sensor`
-  source.
+**Amendment — domain check on `device_class` (issue #13):** the `component` segment is
+hardcoded to `sensor` regardless of the source entity's real domain (the known
+limitation above), so forwarding a non-`sensor` source's `device_class` verbatim is
+unsafe. Two failure modes, both needing a domain check rather than a device_class-name
+check:
+- Some names (`light`, `motion`, ...) are only valid for `binary_sensor`, never
+  `sensor` — forwarding them made a receiver's own `mqtt` integration reject the whole
+  discovery message outright.
+- Some names (`moisture`, `battery`, `power`, ...) are valid members of *both*
+  `SensorDeviceClass` and `BinarySensorDeviceClass`, with different value semantics —
+  numeric for `sensor`, boolean `on`/`off` for `binary_sensor`. A name-only check lets
+  these through; a `binary_sensor`'s `on`/`off` state then crashes numeric coercion on
+  the receiving side.
 
-Either way, omitting the field is safe — a receiver still gets a working, if less
-specific, entity.
+Omitting the field is always safe — a receiver still gets a working, if less specific,
+entity.
 
 ## 4. State payload
 
 Raw state string only (no JSON wrapping), published to the state topic. Uses
-`trigger.to_state.state` on state-triggered publishes (cheaper than re-reading `states()`).
-This was originally published retained, same as the discovery topic — see the issue #29
-amendment below for why that changed.
+`trigger.to_state.state` on state-triggered publishes (cheaper than re-reading
+`states()`). Not retained — see the issue #29 amendment below.
 
-**Amendment: receiving side must translate `unavailable`/`unknown` (issue #27).** A bridged
-entity's own source can legitimately go unavailable — `trigger.to_state.state` is then the
-literal string `"unavailable"` (HA's own sentinel), or `"unknown"`. This isn't a wire
-change (a compliant sender was always going to publish whatever `to_state.state` was, sentinel
-or not), but a receiving Saulach instance's native materialization (§5a) must not write that
-literal string into a native entity's value: Home Assistant only recognizes "no value" via
-`native_value = None`, and "not available" via the `available` property — never via a
-literal string equal to `"unavailable"`. A sensor with a numeric `device_class` (temperature,
-humidity, ...) assumes any non-`None` value is a real number, so writing the raw sentinel
-string crashed HA core's coercion. `BridgedSensorEntity.set_native_value` now maps
-`"unavailable"` → `native_value = None`, `available = False`, and `"unknown"` →
-`native_value = None`, `available = True` (still available, just no current reading), before
-ever calling `async_write_ha_state()` — a purely local, receiving-side interpretation, same
-shape as §5a/§9's other receiving-side amendments.
+**Amendment — translate `unavailable`/`unknown` on receipt (issue #27):** a bridged
+entity's source can legitimately go unavailable, in which case the state payload is the
+literal string `"unavailable"` or `"unknown"` (HA's own sentinels). This isn't a wire
+change — a compliant sender always publishes whatever `to_state.state` is. But a
+receiving instance's native materialization (§5a) must not write that literal string
+into an entity's value: HA recognizes "no value" only via `native_value = None` and
+"not available" only via the `available` property, never via a sentinel string, and a
+sensor with a numeric `device_class` crashes trying to coerce `"unavailable"` to a
+number. `BridgedSensorEntity.set_native_value` maps `"unavailable"` →
+`native_value = None, available = False`, and `"unknown"` →
+`native_value = None, available = True` (still available, just no current reading).
 
-**Amendment: state publishes are no longer retained (issue #29).** Unlike every other
-amendment in this section, this one *is* a wire behavior change on the sending side — the
-original blueprint, and Phase 1 of this integration up to this point, published the state
-topic with `retain=True`, same as the discovery topic. That retained value is exactly what
-`§6`'s time_pattern republish and startup resync rely on to survive a broker/receiver
-restart without waiting for the next real state change. The problem: a retained message is
-redelivered verbatim to *any* fresh subscriber — a receiver reconnecting to the broker, or
-restarting — indistinguishable on the wire from a live republish. A receiver that treats
-incoming state as a delta or feeds it into an accumulator (rather than simply displaying the
-latest value, which is all this protocol's own receivers — MQTT Discovery sensors and
-`BridgedSensorEntity`, §5a — ever did with it) sees that redelivery as a real new event and
-double-counts it. Nothing downstream of the wire protocol is specified as delta/accumulator
-consumption today, but nothing about "raw state string, retained" rules it out either, and
-a consumer built that way has no way to distinguish a stale replay from a fresh publish.
-State-topic publishes now use `retain=False`; the discovery topic (§2/§3) is untouched and
-stays retained — a receiver still only needs to see it once per session to create the
-entity, and it carries no per-tick value to go stale. This does mean a receiver that
-(re)subscribes between state publishes sees no value at all until the next one arrives —
-in the worst case, up to one `time_pattern` interval — instead of the old retained value.
-That gap is an accepted tradeoff for correctness on the delta/accumulator side; nothing
-about a plain last-value display (MQTT Discovery sensor, or `BridgedSensorEntity`) depends
-on the topic being retained in between.
+**Amendment — state is no longer retained (issue #29):** the original blueprint, and
+this integration up to this point, published the state topic retained, same as
+discovery. A retained message is redelivered verbatim to any fresh subscriber (broker
+reconnect, receiver restart) — indistinguishable from a live publish. Harmless for a
+plain last-value display (the only thing this protocol's own receivers ever did with
+it), but it corrupts a receiver that treats incoming state as a delta or accumulates
+it, since there's no way to tell a stale replay from a fresh publish. State-topic
+publishes now use `retain=False`; the discovery topic is untouched and stays retained.
+A receiver that (re)subscribes between state publishes now sees no value until the next
+one arrives — up to one `time_pattern` interval in the worst case — an accepted
+tradeoff since nothing about a plain last-value display depends on retention.
 
-**Why this doesn't need coordinating with the other two bridge instances** (unlike §8's
-Phase 3 redesign): `retain` is a broker-delivery flag, not part of the payload or topic
-shape either side parses — nothing in the blueprint's automation, or in `RemoteEntityManager`,
-branches on whether a state message arrived retained or live. Dropping it only changes
-*when* a subscriber sees a value (immediately from the broker's retained store vs. waiting
-for the next publish), never what it parses out of one once it arrives. A receiver on either
-side of this protocol keeps working exactly as before, just without a stale initial replay.
+This needed no coordination with the other bridge instances: `retain` is a
+broker-delivery flag, not something either side parses out of the payload or topic, so
+dropping it only changes *when* a subscriber sees a value, never what it reads once one
+arrives.
 
-**Migration cleanup (issue #29):** a broker's retained store keeps whatever was last
-published on a topic *forever*, independent of what future publishes do — publishing a new,
-non-retained message does **not** clear a previously-retained one already sitting on that
-topic. Every state value this integration published before this fix is still retained on
-the broker and will keep being redelivered to any fresh subscriber until explicitly cleared.
-`LegacyDiscoveryAdapter.async_clear_retained_state` publishes an empty retained payload
-(the same removal primitive as `async_depublish_entity`, §5b) to each bridged entity's state
-topic — clearing the stale value without touching that entity's still-retained discovery
-topic. `async_setup_entry` runs this for every currently-bridged entity on every startup,
-before the scheduler's own startup full-republish (§6): unconditional and idempotent by
-design (once the retained value is already gone, this is a no-op republish of "still
-empty"), rather than a one-shot migration flag — simpler, and self-healing if a stale
-retained value ever reappears (e.g. a downed receiver that only reconnects to the broker
-after this instance's own cleanup already ran once).
+Because a broker never clears a retained message just because a later publish on the
+same topic isn't retained, every state value published before this fix is still
+retained on the broker. `LegacyDiscoveryAdapter.async_clear_retained_state` publishes
+an empty retained payload to each bridged entity's state topic on every startup, before
+the scheduler's own startup republish — unconditional and idempotent (a no-op once
+already cleared) rather than a one-shot migration flag, so it's self-healing if a stale
+retained value ever reappears.
 
 ## 5. Incoming discovery handling (federation from other instances)
 
-- Subscribe to `{shared_discovery_prefix}+/+/config` (the blueprint hardcodes this as a
-  literal string rather than substituting the configured prefix — a blueprint-engine
-  limitation, not a protocol requirement; the integration should subscribe using the
-  actually configured `shared_discovery_prefix`)
+- Subscribe to `{shared_discovery_prefix}+/+/config`, using the actually configured
+  `shared_discovery_prefix` (the blueprint hardcodes this as a literal string — a
+  blueprint-engine limitation, not a protocol requirement)
 - On message: parse `component` / `object_id` from the topic (see §2), forward the
-  **payload verbatim, unchanged bytes**, to `{local_discovery_prefix}/{component}/{object_id}/config`,
-  retained
+  **payload verbatim, unchanged bytes**, to
+  `{local_discovery_prefix}/{component}/{object_id}/config`, retained
 - **Loop prevention (must be preserved exactly):** skip forwarding if
   `payload.bridge_id == own slug_bridge_name`, OR `payload.unique_id` starts with
-  `"{slug_bridge_name}::"` or `"{slug_bridge_name}."`. The other two instances rely on
+  `"{slug_bridge_name}::"` or `"{slug_bridge_name}."`. The other instances rely on
   recognizing this bridge_id/unique_id prefix convention to avoid re-forwarding your own
-  messages back to you — if this logic isn't preserved exactly, expect forwarding loops.
+  messages back to you — deviate from this exactly and expect forwarding loops.
 
 ## 5a. Amendment: local materialization via native entities
 
-**Status: implemented, supersedes the local-forwarding requirement in §5.**
-Everything else in §5 — subscribing with the configured `shared_discovery_prefix`,
-parsing `component`/`object_id`, and the loop-prevention guard — is unchanged and still
-required exactly as written. What changes is only the last step: instead of forwarding
-the verbatim payload to `{local_discovery_prefix}/{component}/{object_id}/config` for
-Home Assistant's built-in `mqtt` integration to discover, this integration parses the
-payload itself and creates or updates a native entity directly, through its own entity
-platform, keyed by the payload's `unique_id`.
+**Supersedes the local-forwarding step in §5.** Everything else in §5 — subscribing
+with the configured prefix, parsing `component`/`object_id`, the loop guard — is
+unchanged. What changes: instead of forwarding the verbatim payload into HA's built-in
+`mqtt` integration via `local_discovery_prefix`, this integration parses the payload
+itself and creates or updates a native entity directly, keyed by the payload's
+`unique_id`.
 
-**Why this is safe to do without coordinating with the other two bridge instances**
-(unlike the §8 Phase 3 redesign): this is purely a receiving-side, local decision. What a
-bridge does with a message *after* the loop-guard check is never observable by the
-instance that sent it — nothing about it is re-published onto the shared prefix. The
-wire protocol, and every other instance's view of this bridge, is byte-for-byte
-identical to before.
+Safe without coordinating with the other instances because it's purely receiving-side:
+what a bridge does with a message *after* the loop guard is never observable by whoever
+sent it. The wire protocol is unchanged.
 
-**What this fixes:** entities created this way are owned by this integration's config
-entry, so removing the integration removes them automatically via Home Assistant's
-standard config-entry cleanup — no separate depublish step needed for the receiving
-side. It also means this integration no longer writes anything into
-`local_discovery_prefix` (`homeassistant/` by default) for federated entities, removing
-the collision risk with Zigbee2MQTT/ESPHome/Tasmota discovery that motivated the §8
-redesign in the first place — for the receiving side, today, without waiting for Phase 3.
+This is what makes config-entry removal clean up federated entities automatically (no
+separate depublish step needed on the receiving side), and stops this integration from
+writing into `local_discovery_prefix` at all — removing the collision risk with
+Zigbee2MQTT/ESPHome/Tasmota discovery that motivated §8's redesign in the first place,
+for the receiving side, without waiting on Phase 3. It does **not** fix either §2 known
+limitation — both originate on the sending side, before this instance ever sees the
+message.
 
-**What this does *not* fix:** neither of the two §2 known limitations (object_id/domain
-collision, hardcoded `sensor` component) — both originate on the far side, in what the
-*sending* bridge publishes, before this instance ever sees the message.
+**Amendment (issue #13 continued):** a native entity materialized here is just as
+exposed to §3's device_class failure mode as the sending side, and nothing about the
+wire format stops a peer from sending an unsafe payload. Rather than trust the payload,
+`RemoteEntityManager` recovers the source entity's real domain from the payload's own
+`unique_id` (`{slug_bridge_name}::{entity_id}`, §3) and applies the same domain check —
+for both entity creation and update-in-place on redelivery. A `unique_id` that doesn't
+match this convention is treated as unsafe (device_class dropped).
 
-**Amendment (issue #13 continued):** materializing a native entity here means this
-instance is just as exposed to the §3 device_class amendment's failure mode as the
-sending side is — a payload's `device_class` is only safe to apply if it actually came
-from a `sensor`-domain entity, and nothing about the wire format stops a peer (a
-not-yet-updated Saulach instance, or any other implementation of this protocol) from
-sending an unsafe one. Rather than trust the payload, `RemoteEntityManager` recovers the
-source entity's real domain from the payload's own `unique_id` (`{slug_bridge_name}::
-{entity_id}`, §3) and applies the same domain check before setting it on the native
-entity — for both entity creation and update-in-place on redelivery. A `unique_id` that
-doesn't match this convention at all is treated as unsafe (device_class dropped) rather
-than guessed at.
-
-`local_discovery_prefix` remains listed in §1 as a historical note (it's still what the
-*blueprint* does, and still relevant if you're comparing against another instance running
-the blueprint unmodified) but is no longer part of this integration's config — see
-MIGRATION_PLAN.md's Phase 1b for the implementation.
+`local_discovery_prefix` remains listed in §1 as a historical note about what the
+*blueprint* does; it is not part of this integration's config.
 
 ## 5b. Amendment: depublishing own entities (removal signal)
 
-**Status: implemented (issue #7).** Closes the gap §5a left open: cleanup of *this*
-bridge's own entities as seen by *other* instances (§3's outbound side).
+Closes the gap §5a leaves open: cleanup of *this* bridge's own entities as seen by
+*other* instances. When an entity stops being bridged — dropped from the config entry,
+or the whole entry removed — this instance publishes an **empty retained payload** to
+that entity's own discovery topic and state topic. An empty retained payload on a
+discovery config topic is the standard MQTT Discovery removal convention, so
+blueprint-based receivers get this for free through their existing forwarding step.
 
-When an entity stops being bridged — dropped from the config entry's entity list via
-reconfigure, or the whole config entry removed — this instance publishes an **empty
-retained payload** to that entity's own discovery topic
-(`{shared_discovery_prefix}sensor/{object_id}/config`) and state topic
-(`{sensor_value_prefix}sensor/{object_id}`). An empty retained payload on a discovery
-config topic is the standard MQTT Discovery removal convention, so this requires no
-protocol negotiation: Home Assistant's own `mqtt` integration already treats it as
-"remove this entity," which means **blueprint-based receivers get this for free** —
-their forwarding step relays the empty payload into their local discovery root exactly
-like any other payload, and their local `mqtt` integration does the rest.
-
-Saulach-based receivers materialize entities natively instead (§5a), so they don't go
-through the `mqtt` integration's removal handling — `RemoteEntityManager` is taught to
-recognize an empty payload on a topic it previously saw a real payload on (correlated by
-*topic*, not `unique_id`, since an empty payload carries no JSON to read) and remove the
-native entity it created for it.
+Saulach-based receivers materialize entities natively (§5a) instead of going through
+the `mqtt` integration, so `RemoteEntityManager` recognizes an empty payload on a topic
+it previously saw a real payload on — correlated by *topic*, since an empty payload
+carries no JSON `unique_id` to read — and removes the native entity it created for it.
 
 ## 5c. Amendment: manual depublish of a confirmed-dead peer bridge
 
-**Status: implemented (issue #12 follow-up).** §5b's removal signal only reaches a
-receiver if it's online and subscribed at the exact moment the empty retained payload is
-published. MQTT retains a topic's last payload forever otherwise — a fresh subscribe (e.g.
-every Saulach restart) redelivers whatever was last retained, indistinguishable from a
-live republish. If the empty payload was never delivered live (receiver offline, or
-whoever decommissioned the peer only cleared the broker's retained store without a client
-actually online to publish-and-be-delivered), the peer's entities keep reappearing on
-every restart even though the source is long gone — no amount of waiting fixes this, since
-nothing is left to eventually send the missing removal signal.
+§5b's removal signal only reaches a receiver that's online and subscribed at the exact
+moment it's published; MQTT retains a topic's last payload forever otherwise, so a
+peer's entities can keep reappearing on every restart even after the peer itself is
+long gone, with nothing left to send the missing removal signal.
 
-There is no automatic detection for this: MQTT gives a receiver no reliable signal that a
-given peer is dead rather than merely quiet between publishes (unlike a state-change or
-time-pattern republish, silence isn't itself an event). Deciding a specific bridge is dead
-is deliberately left to a human, the same way the person clearing this conversation's six
-example bridges did — by external knowledge (migrated, decommissioned, "yes that's still
-running blueprint"), not by any timeout Saulach could apply on its own.
+There's no automatic detection for this — MQTT gives no reliable signal that a peer is
+dead rather than merely quiet. Deciding a bridge is dead is deliberately left to a
+human. `saulach.depublish_bridge` (a service, not automatic) takes a bridge device the
+user names explicitly, and reads the *entity registry* rather than
+`RemoteEntityManager`'s in-memory state — the whole reason this service exists is for
+peers that were never rediscovered this session, so they have no in-memory footprint at
+all and show as "Unavailable" while still sitting in the registry. For each entity it
+finds, it:
+- publishes an empty retained payload to that entity's own discovery topic,
+  reconstructed from its `unique_id` (`{bridge_id}::{entity_id}`, §3) — the same topic
+  and removal convention as §5b, indistinguishable to any other receiver from the
+  origin bridge's own depublish, and
+- tears it down immediately, through the normal §5b path if `RemoteEntityManager` does
+  have it live this session, or directly from the registry otherwise, rather than
+  waiting on its own publish to loop back over MQTT.
 
-Given that human decision, `saulach.depublish_bridge` (a service, not automatic) takes a
-Saulach bridge device the user names explicitly. It reads the *entity registry*, not
-`RemoteEntityManager`'s in-memory bookkeeping, to find that device's entities — the whole
-reason this service exists is that a long-dead peer's entities were never redelivered this
-session (nothing to redeliver: the retained message is already gone), so they have no
-in-memory footprint at all, and show as "Unavailable" in the UI while still sitting in the
-registry. For each one it finds:
-- publishes an empty retained payload to that entity's own discovery topic, reconstructed
-  from its `unique_id` (`{bridge_id}::{entity_id}`, §3) — the *same* topic, and the *same*
-  removal convention, as §5b — a receiving Saulach or blueprint-based instance elsewhere
-  on the shared prefix cannot tell this apart from the origin bridge's own depublish), and
-- tears it down immediately: through the normal §5b removal path if `RemoteEntityManager`
-  does happen to have it live this session, or directly from the registry otherwise (there
-  is no live entity to remove any other way). Either way it doesn't wait on its own publish
-  to loop back over MQTT.
-
-Diagnostic entities (§9) have no discovery topic of their own — they're removed as a side
-effect once every real entity for the bridge is gone, the same as an organic removal
-(§5a's amendment) already does.
+Diagnostic entities (§9) have no discovery topic of their own — they're removed as a
+side effect once every real entity for the bridge is gone, same as an organic removal.
 
 Publishing to a topic this instance didn't originate is unusual but not a protocol
-violation — the shared prefix has no per-topic ownership model, and §5b's removal
-convention only cares that an empty retained payload arrived, not who sent it. Because the
-broker's retained store is actually cleared this time (not merely cleared-without-anyone-
-subscribed, or never cleared at all), the peer stops reappearing on future restarts too —
-unlike a plain local entity deletion, which would only hide it until the next restart
-redelivers the same stale retained messages.
+violation — the shared prefix has no per-topic ownership model, and §5b's convention
+only cares that an empty retained payload arrived, not who sent it. Because the
+broker's retained store is actually cleared this time, the peer stops reappearing on
+future restarts too — unlike a plain local entity deletion, which only hides it until
+the next restart redelivers the same stale retained messages.
+
+## 6. Publish triggers and timing
 
 - State-change on any bridged entity → publish discovery + state for that one entity
-- Time-pattern trigger (every `time_pattern` minutes) → full republish loop over all bridged
-  entities (discovery + state) — this is the resync-after-restart / retained-message-refresh
-  mechanism
-- On-demand full republish (was a custom HA event `force_republish_sensors` in the
-  blueprint) → same as above
+- Time-pattern trigger (every `time_pattern` minutes) → full republish loop over all
+  bridged entities (discovery + state) — the resync-after-restart /
+  retained-message-refresh mechanism
+- On-demand full republish (`saulach.republish` service; was a custom HA event
+  `force_republish_sensors` in the blueprint) → same as above
 - Incoming MQTT discovery on the shared prefix → forwarding logic (§5)
-- **Jitter:** before any discovery/state publish, a random 0–9 second delay is applied.
-  This desyncs near-simultaneous publishes from multiple instances hitting the broker at
-  the same moment (three instances all firing on the same time-pattern minute mark would
-  otherwise collide). Preserve this or a functionally equivalent spread mechanism.
-- Original automation ran with `mode: parallel, max: 50` — relevant because bursts of state
-  changes across many bridged entities can produce many simultaneous publishes.
+- **Jitter:** before any discovery/state publish, a random 0–9 second delay is applied,
+  to desync near-simultaneous publishes from multiple instances hitting the broker at
+  the same moment (e.g. three instances all firing on the same time-pattern minute
+  mark). Preserve this or a functionally equivalent spread mechanism.
+- Original automation ran with `mode: parallel, max: 50` — relevant because bursts of
+  state changes across many bridged entities can produce many simultaneous publishes.
 
 ## 7. Deliberately dropped feature
 
-The blueprint name is "...(stable, no availability)" — availability/LWT tracking existed at
-some point and was removed for stability. Check the source repo's commit history for why
-before reintroducing this in Phase 3.
+The blueprint's name is "...(stable, no availability)" — availability/LWT tracking
+existed at some point and was removed for stability. Check the source repo's commit
+history for why before reintroducing this.
 
 ## 8. Forward compatibility: Phase 3 target design (named, not implemented)
 
-Phase 1 reproduces the blueprint's MQTT-Discovery-emulation protocol exactly, as specified
-above — with one exception, §4's issue #29 amendment dropping `retain` on state-topic
-publishes, which is a deliberate, backward-compatible deviation (see that amendment for why
-it doesn't require coordinating with the other instances). Otherwise, no wire changes.
-However, a target design for a future protocol generation has
-been identified and is documented here so it doesn't need to be rediscovered later. It is
-**not implemented in Phase 1 or Phase 2**, and is gated on coordinating a rollout with the
-other two bridge instances — do not build it unprompted.
+This integration reproduces the blueprint's MQTT-Discovery-emulation protocol, with one
+deliberate, backward-compatible deviation (§4's issue #29 amendment dropping `retain`
+on state-topic publishes). Otherwise, no wire changes. A target design for a future
+protocol generation has been identified and is documented here so it doesn't need to be
+rediscovered later. **Not implemented, and gated on coordinating a rollout with the
+other two bridge instances — do not build it unprompted.**
 
 **Problem it solves:** the current protocol emulates MQTT Discovery by writing into
 `local_discovery_prefix` (`homeassistant/` by default) — a namespace shared with
-Zigbee2MQTT/ESPHome/Tasmota discovery. Combined with the §2 object_id/domain collision
-known limitation, this is a real risk of a bridged entity colliding with, or being
-overwritten by, an unrelated device's discovery message.
+Zigbee2MQTT/ESPHome/Tasmota discovery. Combined with §2's object_id/domain collision,
+this is a real risk of a bridged entity colliding with an unrelated device's discovery
+message.
 
-**Target design:** each bridge instance publishes its own retained JSON "manifest" —
-a list of `{bridge_id, object_id, domain, name, device_class, unit, state_topic}` per
+**Target design:** each bridge instance publishes its own retained JSON "manifest" — a
+list of `{bridge_id, object_id, domain, name, device_class, unit, state_topic}` per
 bridged entity — under a dedicated, bridge-only topic tree:
 `ha_bridge/{bridge_id}/manifest`. Other instances subscribe only to the manifests of
-bridges they explicitly opt into (a config-flow "follow list", not a blanket subscribe to
-everything on the shared prefix). Each instance diffs the manifest against the native HA
-entities it has already instantiated for that remote bridge, and creates/removes native
-entities directly through its own entity platform. There is no MQTT Discovery emulation
-in this design, no writes to the local discovery root, and no forwarding/echo-prevention
-logic (§5) — a bridge just reads its followed peers' manifests and reconciles entities
-against them. As a side effect, this eliminates both §2 known limitations: entities carry
+bridges they explicitly opt into (a config-flow "follow list", not a blanket subscribe
+to the shared prefix), diff the manifest against the native entities already
+instantiated for that peer, and create/remove entities directly. No MQTT Discovery
+emulation, no writes to the local discovery root, no forwarding/echo-prevention logic
+(§5). As a side effect, this eliminates both §2 known limitations — entities carry
 their real domain and no longer collide on a shared `sensor/{object_id}` topic.
 
-**Migration path — `protocol_version`:** every own-payload JSON this integration
-publishes carries a `protocol_version` integer field (§3; Phase 1 sets it to `1`). Once a
-future manifest-based payload exists, it will carry its own `protocol_version` (2+). This
-lets any instance inspect `protocol_version` per bridge partner on incoming messages and
-decide, per partner, whether to speak the legacy discovery protocol or the manifest
-protocol — enabling a gradual, partner-by-partner rollout instead of a synchronized
-cutover across all three instances on one day.
+**Migration path — `protocol_version`:** every own-payload JSON carries a
+`protocol_version` integer field (§3; `1` today). A future manifest-based payload will
+carry its own (`2+`), letting any instance decide per bridge partner whether to speak
+legacy discovery or manifest — a gradual, partner-by-partner rollout instead of a
+synchronized cutover.
 
-See `MIGRATION_PLAN.md` for the internal `ProtocolAdapter` abstraction that keeps Phase 1's
-implementation swappable when this design is eventually built.
+`MIGRATION_PLAN.md` documents the internal `ProtocolAdapter` seam that keeps this
+implementation swappable when Phase 3 is eventually built.
 
 **Relationship to §5a:** §5a already brought the *local materialization* half of this
-design forward — incoming messages become native entities, not forwarded discovery. What
-Phase 3 still owns exclusively is the *outbound* half (own entities as a manifest instead
-of MQTT Discovery emulation) and the follow-list/opt-in subscription model — both
-wire-protocol changes requiring the cross-instance coordination described above. When
-Phase 3 lands, its manifest-diffing logic is expected to feed the same entity
-materialization layer §5a introduced, rather than building a second one.
+design forward. What Phase 3 still owns exclusively is the *outbound* half (own
+entities as a manifest instead of MQTT Discovery emulation) and the follow-list
+subscription model — both wire-protocol changes requiring cross-instance coordination.
+Its manifest-diffing logic is expected to feed the same entity materialization layer
+§5a introduced, not a second one.
 
 ## 9. Metadata message (issue #12)
 
-**Status: implemented.** A small, additive side-channel alongside the §2-§5 protocol —
-each bridge periodically publishes a retained JSON message describing itself: protocol
-version, this integration's own release version, the local Home Assistant version, how
-many entities it's currently bridging, and a last-heartbeat timestamp.
+A small, additive side-channel alongside §2-§5: each bridge periodically publishes a
+retained JSON message describing itself — protocol version, this integration's own
+release version, the local HA version, how many entities it's currently bridging, and a
+last-heartbeat timestamp.
 
 **Topic:** `{shared_discovery_prefix}bridge/{slug_bridge_name}/metadata`, retained.
 
@@ -392,7 +326,7 @@ many entities it's currently bridging, and a last-heartbeat timestamp.
 ```json
 {
   "protocol_version": 1,
-  "integration_version": "0.1.3",
+  "integration_version": "0.1.10",
   "bridge_id": "bridge_jakob",
   "ha_version": "2026.8.0",
   "entity_count": 7,
@@ -402,67 +336,52 @@ many entities it's currently bridging, and a last-heartbeat timestamp.
 
 `last_heartbeat` is a plain "as of this publish" UTC timestamp, refreshed every
 publish — it carries no online/offline or staleness inference. Availability tracking is
-the feature §7 says was deliberately dropped from the original blueprint for stability,
-and stays out of scope here; a future change that wants it needs its own design pass.
+the feature §7 says was deliberately dropped from the blueprint for stability, and
+stays out of scope here.
 
-**Why this needs no coordination with the other two bridge instances** (unlike §8's
-Phase 3 redesign): the topic has three segments ending in `metadata`, so it never matches
-`{shared_discovery_prefix}+/+/config` — the two-segment, `config`-suffixed pattern every
-receiver (blueprint or Saulach) subscribes to today (§5). Nobody's subscription sees
-this message unless they deliberately opt into it in the future, so publishing it
-unilaterally changes nothing about how any existing receiver behaves — the same safety
-argument §5a used for native materialization.
+Needs no coordination with the other bridge instances: the topic has three segments
+ending in `metadata`, so it never matches `{shared_discovery_prefix}+/+/config`, the
+pattern every receiver subscribes to today (§5). Nobody sees this message unless they
+deliberately opt in, so publishing it unilaterally changes nothing about how any
+existing receiver behaves.
 
 **Timing:** published on the same `time_pattern` tick as the full discovery/state
-republish (§6) — at startup, on the periodic clock-aligned trigger, and on-demand via the
-`republish` service — rather than a second, separately configurable interval. Subject to
-the same 0-9s jitter as any other publish.
+republish (§6) — at startup, on the periodic trigger, and on-demand via the
+`republish` service — rather than a second, separately configurable interval. Subject
+to the same jitter as any other publish.
 
-**Local surfacing (own bridge): reverted.** An earlier version of this amendment also
-surfaced this bridge's own metadata locally — a device representing "this bridge
-instance" with three `entity_category: diagnostic` entities (entity count, last
-heartbeat, HA version). In practice this just added a device with no sensors on it to
-every Saulach install, cluttering the integration's device list without adding
-information the user didn't already have some other way (they're the one running this
-instance). Removed per user feedback; this bridge's own metadata is now wire-only —
-still published every tick as documented above, still available via Home Assistant's
-"Download Diagnostics" for support requests (`diagnostics.py` reads the same
-`last_metadata` the scheduler already tracks), just not materialized as a local device or
-entities. **Remote** bridges' metadata (next amendment) is unaffected by this — that's a
-materially different situation, since a remote bridge's device is something the user
-doesn't otherwise have visibility into locally.
+**Local surfacing (own bridge): wire-only.** An earlier version also surfaced this
+bridge's own metadata locally, as a device with three `entity_category: diagnostic`
+entities (entity count, last heartbeat, HA version). This just added a device with no
+sensors on it to every install, without adding information the user didn't already have
+some other way, so it was removed — this bridge's own metadata is published every tick
+as documented above and available via "Download Diagnostics"
+(`diagnostics.py` reads the same `last_metadata` the scheduler tracks), but not
+materialized as a local device or entities. **Remote** bridges' metadata is unaffected —
+a remote bridge's device is something the user has no other local visibility into.
 
-**Amendment: consuming other bridges' metadata (issue #12 follow-up).** Status:
-implemented. `LegacyDiscoveryAdapter` also subscribes to
-`{shared_discovery_prefix}bridge/+/metadata`. Deliberately *not* a follow-list/opt-in
-mechanism (§8's Phase 3 manifest is where that belongs) — eligibility instead falls out of
-state this integration already has: a remote bridge's metadata is only ever shown if
-`RemoteEntityManager` has already materialized at least one entity from that `bridge_id`
-via §5a. If a metadata message arrives for a bridge we have no entities from, it's dropped
-— there's no device to attach it to and no reason to create one from metadata alone. The
-same three `entity_category: diagnostic` entities used for this bridge's own device are
-created on *their* device the first time metadata is seen, then updated in place on every
-redelivery. If that bridge's last entity is later removed (§5b), its diagnostic entities
-are removed too, for the same reason they were created: nothing left to attach them to.
-Own metadata arriving back via the broker (any client subscribed to
+**Consuming other bridges' metadata:** `LegacyDiscoveryAdapter` also subscribes to
+`{shared_discovery_prefix}bridge/+/metadata`. Deliberately not a follow-list/opt-in
+mechanism (§8's Phase 3 manifest is where that belongs) — eligibility falls out of
+state this integration already has: a remote bridge's metadata is only shown if
+`RemoteEntityManager` has already materialized at least one entity from that
+`bridge_id` via §5a. A metadata message for a bridge with no entities is dropped —
+there's no device to attach it to. The same three diagnostic entities used for this
+bridge's own device are created on *their* device the first time metadata is seen, then
+updated in place on every redelivery, and removed once that bridge's last entity is
+removed (§5b). Own metadata arriving back via the broker (any subscriber to
 `bridge/+/metadata` receives its own retained publish) is dropped by a loop guard
-comparing the topic's `bridge_id` against this instance's own slug — same shape as §5's
-loop guard, simpler since there's no JSON `unique_id`/`bridge_id` prefix convention to
-check, just an exact match.
+comparing the topic's `bridge_id` against this instance's own slug.
 
-**Amendment: remote device's displayed firmware.** A remote bridge's native device (§5a)
-gets its `sw_version` from exactly one place: the diagnostic entities above, set to
-`"{integration_version} (protocol v{protocol_version})"`. `BridgedSensorEntity` (the
-regular bridged-entity device_info, built from every §2/§3 discovery message) does
-**not** set `sw_version`, even though the incoming payload's `device.sw_version` field is
-present — that field is always the wire protocol's fixed legacy constant (§3's
-`SW_VERSION`, `"1.0.3"`, inherited unchanged from the original blueprint automation), not
-a peer's actual release version. Home Assistant's device registry takes whichever entity
-most recently supplied a `sw_version` for a given device, and ordinary discovery messages
-fire far more often (every state change, not just the `time_pattern` tick metadata uses)
-than metadata does — so if `BridgedSensorEntity` also set it, `"1.0.3"` would win almost
-every time, permanently hiding the real version shown by the diagnostic entities. Purely a
-receiving-side display choice, like §5a — the outgoing wire payload (§3) is unchanged, and
-a bridge with no metadata yet (a blueprint-based peer, which never sends §9 at all, or a
+**Remote device's displayed firmware:** a remote bridge's native device (§5a) gets its
+`sw_version` from exactly one place — the diagnostic entities above, set to
+`"{integration_version} (protocol v{protocol_version})"`. `BridgedSensorEntity` does
+**not** set `sw_version`, even though the incoming discovery payload's
+`device.sw_version` field is present — that field is always the wire protocol's fixed
+legacy constant (§3's `SW_VERSION`, `"1.0.3"`), not a peer's actual release version.
+HA's device registry keeps whichever entity most recently supplied `sw_version`, and
+ordinary discovery fires far more often than metadata, so if `BridgedSensorEntity` also
+set it, `"1.0.3"` would win almost every time and permanently hide the real version. A
+bridge with no metadata yet (a blueprint-based peer, which never sends §9 at all, or a
 Saulach peer whose first `time_pattern` tick hasn't landed) simply shows no firmware
 version rather than the misleading constant.

@@ -2,7 +2,7 @@
 
 A native integration port of the MQTT bridge blueprint. See PROTOCOL.md
 for the wire-protocol contract this must reproduce, and MIGRATION_PLAN.md
-for the phased rollout this is Phase 1(b) of.
+for the overall architecture and roadmap.
 """
 
 from __future__ import annotations
@@ -94,8 +94,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Services are domain-global, not per-entry, so on-demand republish
     # dispatches through a small entry-keyed registry rather than a
-    # singleton — this keeps the signature stable when Phase 2 multi-entry
-    # support lands (MIGRATION_PLAN.md Decision 3). depublish_bridge below
+    # singleton — this keeps the signature stable when multi-entry support
+    # lands (MIGRATION_PLAN.md's "Open items"). depublish_bridge below
     # needs to go from a device the user picked back to *its* entry's
     # RemoteEntityManager, so it gets the same treatment rather than
     # depending on hass.config_entries.async_get_entry/async_entries --
@@ -229,7 +229,7 @@ def _make_depublish_bridge_service_handler(hass: HomeAssistant):
     async def _async_handle_depublish_bridge(call: ServiceCall) -> None:
         # Never automatic/heuristic -- a human has already decided, by
         # naming a specific device here, that this peer bridge is dead
-        # (CLAUDE.md §5c). We only act on exactly the entities this
+        # (PROTOCOL.md §5c). We only act on exactly the entities this
         # instance currently has materialized for it.
         device_id = call.data[ATTR_BRIDGE_DEVICE]
         device_registry = dr.async_get(hass)
