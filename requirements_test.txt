@@ -1,4 +1,5 @@
 pytest>=8.0
+voluptuous>=0.13
 
 # All tests in this repo run against tests/ha_stubs/ — a small hand-written
 # fake of the Home Assistant surface this integration touches (state
@@ -6,13 +7,14 @@ pytest>=8.0
 # exists because this project's dev sandbox cannot install a real
 # `homeassistant` package matching the 2026.7 core floor (pip's mirror here
 # tops out at 2024.3.3, and even that failed to build via a broken
-# transitive dependency — see git history for the investigation). No extra
-# packages are required beyond pytest; see
+# transitive dependency — see git history for the investigation). voluptuous
+# is the one real dependency pulled in directly (config_flow.py/__init__.py
+# use it for schema validation, same as real HA integrations do); see
 # tests/ha_stubs/homeassistant/__init__.py for what the stub does and does
 # not model.
 #
 # A pytest-homeassistant-custom-component/real-homeassistant test layer was
-# considered and declined (MIGRATION_PLAN.md Decision 9) -- production use
-# across multiple federated instances is the accepted acceptance-testing
-# strategy instead of a real-HA test dependency, not an interim measure
-# waiting on one.
+# considered and declined (MIGRATION_PLAN.md's testing-strategy note) --
+# production use across multiple federated instances is the accepted
+# acceptance-testing strategy instead of a real-HA test dependency, not an
+# interim measure waiting on one.

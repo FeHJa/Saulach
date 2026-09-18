@@ -28,8 +28,8 @@ interoperates with instances still running the original blueprint.
   service for the same thing on demand.
 
 See [`PROTOCOL.md`](PROTOCOL.md) for the exact wire contract this
-implements, and [`MIGRATION_PLAN.md`](MIGRATION_PLAN.md) for the phased
-rollout this integration is being built against.
+implements, and [`MIGRATION_PLAN.md`](MIGRATION_PLAN.md) for the
+architecture and roadmap.
 
 ## Prerequisites
 
@@ -47,22 +47,18 @@ broker, there's nothing to set up here.
 
 ## Status
 
-Phase 1 + 1b (behavior-preserving blueprint port, plus native entity
-creation for received entities pulled forward from Phase 3) are complete
-and validated in real-world use: multiple independent Home Assistant
-installs, some still running the original blueprint automation, federate
-over a shared broker today without behavior changes on the blueprint side.
-Several real issues surfaced this way and were fixed (blocking I/O on
-setup, `device_class` mismatches crashing receivers, entity/device cleanup
-gaps, crashes on a bridged entity's source going unavailable, stale
-retained state values replayed on reconnect) — see `MIGRATION_PLAN.md`'s
-Decisions section and `PROTOCOL.md`'s §4/§5b/§5c/§9 amendments for the
-details.
+The Phase 1 baseline (behavior-preserving blueprint port, plus native entity
+creation for received entities) is complete and validated in real-world use:
+multiple independent Home Assistant installs, some still running the original
+blueprint automation, federate over a shared broker today without behavior
+changes on the blueprint side. See `MIGRATION_PLAN.md` for the architecture
+and what's still open, and `PROTOCOL.md` for the exact wire contract,
+including every backward-compatible amendment shipped since the baseline.
 
 Acceptance testing happens by running this in production and fixing what
 breaks, rather than through a `pytest-homeassistant-custom-component`-based
-integration-test layer or a CI pipeline — both considered and declined,
-see `MIGRATION_PLAN.md` Decision 9.
+integration-test layer or a CI pipeline — both considered and declined, see
+`MIGRATION_PLAN.md`'s "Engineering notes".
 
 ## Installation
 

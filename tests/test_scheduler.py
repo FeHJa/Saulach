@@ -260,7 +260,7 @@ def test_clock_tick_republishes_metadata_alongside_entities(monkeypatch):
 def test_last_metadata_is_recorded_after_publish(monkeypatch):
     # last_metadata is kept for diagnostics.py's "Download Diagnostics"
     # only -- own metadata is no longer surfaced as local entities (issue
-    # #12 follow-up, reverted per user feedback).
+    # #12 follow-up, reverted -- see PROTOCOL.md §9's "Local surfacing" note).
     _no_jitter(monkeypatch)
     hass, entry = _make_hass_entry(["sensor.a"])
     hass.states.async_set("sensor.a", "x")

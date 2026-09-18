@@ -14,8 +14,8 @@ DOMAIN = "saulach"
 
 # Config entry keys (PROTOCOL.md §1). local_discovery_prefix is
 # deliberately absent -- it existed only to support forwarding into HA's
-# local MQTT Discovery root, which Phase 1b (§5a) replaced with native
-# entity creation. See MIGRATION_PLAN.md Decision 6.
+# local MQTT Discovery root, which Phase 1b replaced with native entity
+# creation (PROTOCOL.md §5a).
 CONF_ENTITIES = "entities"
 CONF_SHARED_DISCOVERY_PREFIX = "shared_discovery_prefix"
 CONF_SENSOR_VALUE_PREFIX = "sensor_value_prefix"
@@ -37,7 +37,7 @@ JITTER_MAX_SECONDS = 9
 SERVICE_REPUBLISH = "republish"
 ATTR_CONFIG_ENTRY_ID = "config_entry_id"
 
-# Manual depublish of a dead peer bridge (issue #12/CLAUDE.md §5c) -- never
+# Manual depublish of a dead peer bridge (PROTOCOL.md §5c) -- never
 # triggered automatically, always a human naming a specific bridge device.
 SERVICE_DEPUBLISH_BRIDGE = "depublish_bridge"
 ATTR_BRIDGE_DEVICE = "bridge_device"
