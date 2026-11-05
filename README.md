@@ -62,17 +62,22 @@ integration-test layer or a CI pipeline — both considered and declined, see
 
 ## Installation
 
-### Via HACS (custom repository)
+### Via the Marketplace (custom repository)
 
-Not in HACS's default store yet, so it has to be added manually as a
-custom repository:
+Not in the default catalog yet, so add it as a custom repository:
 
-1. HACS → the "⋮" menu (top right) → **Custom repositories**.
-2. Repository: `https://github.com/FeHJa/Saulach`, category:
-   **Integration**.
-3. Install "Saulach Bridge" from HACS, then restart Home Assistant.
-4. Settings → Devices & Services → Add Integration → search for
-   "Saulach Bridge".
+1. Settings → **Marketplace** → **Add from link** (top right).
+2. Enter the repository URL: `https://github.com/FeHJa/Saulach`.
+3. First time only: custom repositories require a GitHub connection — approve
+   the device-sign-in prompt the Marketplace shows. This only reads public
+   repository info; it can't access private repositories or your Home
+   Assistant password.
+4. Find "Saulach Bridge" in the Marketplace and select **Install** — this
+   goes straight into its setup flow, no restart needed for a fresh install
+   (updates still need one).
+
+Repositories added this way also show up under the "⋮" menu → **Custom
+repositories**, where you can reopen or remove them later.
 
 ### Manually
 
