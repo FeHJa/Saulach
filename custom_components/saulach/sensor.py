@@ -18,7 +18,7 @@ from homeassistant.const import EntityCategory, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, PROTOCOL_VERSION
 
 
 async def async_setup_entry(
@@ -154,6 +154,7 @@ class BridgeMetadataEntities:
             "model": slug_bridge_name,
             "sw_version": f"{integration_version} (protocol v{protocol_version})",
         }
+        self._device_info = device_info
         self.entity_count = _BridgeDiagnosticSensor(
             unique_id=f"{slug_bridge_name}::entity_count",
             name="Bridged entity count",
@@ -172,6 +173,20 @@ class BridgeMetadataEntities:
         self.entities = [self.entity_count, self.last_heartbeat, self.ha_version]
 
     def update(self, metadata: dict) -> None:
+        # Bug: this used to only refresh the three visible sensor values.
+        # device_info["sw_version"] is set once, in __init__, the first
+        # time this bridge's metadata is ever seen -- every later
+        # redelivery (e.g. the peer actually upgrading) went through this
+        # method instead of __init__, so the displayed firmware stayed
+        # frozen at whatever it was the first time, forever, regardless
+        # of how many times the peer actually upgraded. All three
+        # diagnostic entities share this one device_info dict by
+        # reference (see __init__), so mutating it here updates all of
+        # them; set_native_value's async_write_ha_state() below is what
+        # actually pushes the refreshed value to the device registry.
+        integration_version = metadata.get("integration_version", "unknown")
+        protocol_version = metadata.get("protocol_version", PROTOCOL_VERSION)
+        self._device_info["sw_version"] = f"{integration_version} (protocol v{protocol_version})"
         self.entity_count.set_native_value(str(metadata["entity_count"]))
         self.last_heartbeat.set_native_value(metadata["last_heartbeat"])
         self.ha_version.set_native_value(metadata["ha_version"])

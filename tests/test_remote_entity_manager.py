@@ -509,6 +509,32 @@ def test_metadata_redelivery_updates_values_without_readding():
     assert holder.entity_count.native_value == "5"
 
 
+def test_metadata_redelivery_refreshes_displayed_firmware():
+    # Bug: BridgeMetadataEntities.update() only refreshed the three
+    # visible sensor values -- device_info["sw_version"] was set once,
+    # in __init__, the first time this bridge's metadata was ever seen,
+    # and then frozen forever. A peer that later actually upgrades their
+    # integration keeps showing their *old* version here, no matter how
+    # many fresh metadata messages arrive, since every redelivery after
+    # the first goes through update() instead of __init__.
+    hass = HomeAssistant()
+    manager, added = _make_manager(hass)
+
+    async def scenario():
+        await manager.async_handle_discovery(DISCOVERY_TOPIC, dict(EXAMPLE_PAYLOAD))
+        await manager.async_handle_remote_metadata("other_bridge", dict(METADATA_PAYLOAD))
+        upgraded = dict(METADATA_PAYLOAD)
+        upgraded["integration_version"] = "0.1.11"
+        upgraded["protocol_version"] = 2
+        await manager.async_handle_remote_metadata("other_bridge", upgraded)
+
+    _run(scenario())
+
+    holder = manager._remote_metadata_entities["other_bridge"]
+    for entity in holder.entities:
+        assert entity._attr_device_info["sw_version"] == "0.1.11 (protocol v2)"
+
+
 def test_metadata_diagnostic_entities_removed_when_last_entity_removed():
     hass = HomeAssistant()
     manager, added = _make_manager(hass)
