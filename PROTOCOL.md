@@ -348,7 +348,7 @@ last-heartbeat timestamp.
 ```json
 {
   "protocol_version": 1,
-  "integration_version": "0.1.11",
+  "integration_version": "0.1.12",
   "bridge_id": "bridge_jakob",
   "ha_version": "2026.8.0",
   "entity_count": 7,

@@ -4,7 +4,7 @@
 
 **Peer-to-peer entity federation for Home Assistant.**
 
-**Version: 0.1.11** — in active production use, federating multiple real
+**Version: 0.1.12** — in active production use, federating multiple real
 Home Assistant instances over a real MQTT broker.
 
 A native Home Assistant custom integration that bridges entities between
